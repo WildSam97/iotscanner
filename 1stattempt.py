@@ -4,6 +4,8 @@ import socket
 import threading
 import time
 import queue
+import xml.etree.ElementTree as ET
+
 
 class scanGUI():
 
@@ -41,10 +43,7 @@ class scanGUI():
             self.queue = queue.Queue()
             ThreadedScan(self.queue, localIP).start()
             self.master.after(100, self.process_queue)
-            #try: performscan(localIP)
-            #finally:
-            #    self.scanrunning = 0
-            #    self.scanvar.set("Scan finished")
+            
     
     def process_queue(self):
         try:
@@ -60,11 +59,14 @@ class ThreadedScan(threading.Thread):
         self.queue = queue
         self.localIP = localIP
     def run(self):
-        #time.sleep(4)
+        #run an nmap scan outputting result to a file, put task finished to queue when it ends
         subprocess.run(["nmap", "-sP", "-PU161,5353", "-PA21,22,25,3389", "-PS22,3389", "-oA", "pythontestscanresult", self.localIP])
+        tree = ET.parse('pythontestscanresult.xml')
+        root = tree.getroot()
+        for host in root.iter('host'):
+            print(host.attrib)
         self.queue.put("Task finished")
-        #self.scanrunning = 0
-        #self.scanvar.set("Scan finished")
+        
      
    
 root = Tk()
