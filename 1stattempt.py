@@ -1,9 +1,11 @@
 from tkinter import Tk, Label, Button, StringVar
-import subprocess
+from libnmap.process import NmapProcess
+from libnmap.parser import NmapParser, NmapParserException
+# import subprocess
 import socket
 import threading
 import queue
-import xml.etree.ElementTree as ET
+# import xml.etree.ElementTree as ET
 
 
 class scanGUI():
@@ -47,8 +49,9 @@ class scanGUI():
 
     def process_queue(self):
         try:
-            # msg = self.queue.get(0)
+            msg = self.queue.get(0)
             self.scanrunning = 0
+            print(msg)
             self.scanvar.set("Scan finished")
         except queue.Empty:
             self.master.after(100, self.process_queue)
@@ -63,14 +66,51 @@ class ThreadedScan(threading.Thread):
     def run(self):
         # run an nmap scan outputting result to a file, put task finished to
         # queue when it ends
-        subprocess.run(["nmap", "-sP", "-PU161,5353", "-PA21,22,25,3389",
-                        "-PS22,3389", "-oA", "pythontestscanresult",
-                        self.localIP])
-        tree = ET.parse('pythontestscanresult.xml')
-        root = tree.getroot()
-        for host in root.iter('host'):
-            print(host.attrib)
+        # rewrite this using libnmap
+        # subprocess.run(["nmap", "-sP", "-PU161,5353", "-PA21,22,25,3389",
+        #               "-PS22,3389", "-oA", "pythontestscanresult",
+        #                self.localIP])
+
+        # tree = ET.parse('pythontestscanresult.xml')
+        # root = tree.getroot()
+        # for host in root.iter('host'):
+        #     print(host.attrib)
+        report = run_scan(self.localIP)
+        if report:
+            print_scan(report)
+        else:
+            print("No results returned")
         self.queue.put("Task finished")
+
+
+def run_scan(IP):
+        # self.queue.put("Starting scan for: " + self.localIP)
+    parsed = None
+    nmproc = NmapProcess(IP, "-sP")
+    rc = nmproc.run()
+    if rc != 0:
+        print("nmap scan failed: {0}".format(nmproc.stderr))
+    # print(type(nmproc.stdout))
+    try:
+        parsed = NmapParser.parse(nmproc.stdout)
+    except NmapParserException as e:
+        print("Exception raised while parsing scan: {0}".format(e.msg))
+    return parsed
+
+
+def print_scan(nmap_report):
+    for host in nmap_report.hosts:
+        if len(host.hostnames):
+            tmp_host = host.hostnames.pop()
+        else:
+            tmp_host = host.address
+
+        if host.is_up():
+            print("Nmap scan report for {0} ({1})".format(tmp_host,
+                                                          host.address))
+            print("Host is {0}.".format(host.status))
+            if host.vendor:
+                print("Vendor is {0}.".format(host.vendor))
 
 
 root = Tk()
