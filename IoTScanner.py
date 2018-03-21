@@ -8,7 +8,7 @@ import queue
 # import xml.etree.ElementTree as ET
 
 ips = []
-devices = []
+detailed_ips = []
 
 
 class scan_GUI():
@@ -58,13 +58,20 @@ class scan_GUI():
             print(msg)
             self.scanrunning = 0
             self.scanvar.set("Scan finished")
-            tmpcount = 0
+            # tmpcount = 0
             self.ipList.delete(0, self.ipList.size())
-            for ip in ips:
-                self.ipList.insert(tmpcount, ip)
-                tmpcount += 1
+            self.fill_listbox(ips, self.ipList)
+            # for ip in ips:
+            #    self.ipList.insert(tmpcount, ip.address)
+            #    tmpcount += 1
         except queue.Empty:
             self.master.after(100, self.process_queue)
+
+    def fill_listbox(self, ip_list, target_listbox):
+        lstCount = 0
+        for ip in ip_list:
+            target_listbox.insert(lstCount, ip.address)
+            lstCount += 1
 
 
 class ThreadedScan(threading.Thread):  # class for intial ip scan
@@ -79,7 +86,8 @@ class ThreadedScan(threading.Thread):  # class for intial ip scan
         report = run_scan(self.localIP)
         if report:
             print_scan(report)
-            get_ips_from_scan(report)
+            add_hosts_to_list(report, ips)
+            # get_ips_from_scan(report)
         else:
             print("No results returned")
         self.queue.put("Task finished")
@@ -116,7 +124,6 @@ def print_scan(nmap_report):
 
 
 def get_ips_from_scan(nmap_report):
-    str1 = "192.168.1.81 amazon-fe4b4ee6c.home Amazon Technologies"
     for host in nmap_report.hosts:
         if len(host.hostnames):
             tmp_host = host.hostnames[0]
@@ -131,7 +138,13 @@ def get_ips_from_scan(nmap_report):
                 ips.append(tmp_val)
 
 
-class Threaded_device_scan(threading.Thread):
+def add_hosts_to_list(nmap_report, ip_list):
+    for host in nmap_report.hosts:
+        if host.is_up():
+            ip_list.append(host)
+
+
+class Threaded_detailed_scan(threading.Thread):
     def __init__(self, queue, dev_ip):
         threading.Thread.__init__(self)
         self.queue = queue
