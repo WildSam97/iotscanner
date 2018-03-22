@@ -8,7 +8,7 @@ import queue
 # import xml.etree.ElementTree as ET
 
 ips = []
-detailed_ips = []
+detailed_ips = {}
 
 
 class scan_GUI():
@@ -51,19 +51,24 @@ class scan_GUI():
             self.queue = queue.Queue()
             ThreadedScan(self.queue, localIP).start()
             self.master.after(100, self.process_queue)
+            # Threaded_detailed_scan(self.queue).start()
+            # self.master.after(100, self.process_queue)
 
     def process_queue(self):
         try:
             msg = self.queue.get(0)
             print(msg)
-            self.scanrunning = 0
-            self.scanvar.set("Scan finished")
-            # tmpcount = 0
-            self.ipList.delete(0, self.ipList.size())
-            self.fill_listbox(ips, self.ipList)
-            # for ip in ips:
-            #    self.ipList.insert(tmpcount, ip.address)
-            #    tmpcount += 1
+            # self.scanrunning = 0
+            if msg == "Initial scan finished":
+                self.scanvar.set("Inital Scan finished" +
+                                 "- starting detailed scans")
+                self.ipList.delete(0, self.ipList.size())
+                self.fill_listbox(ips, self.ipList)
+                Threaded_detailed_scan(self.queue).start()
+                self.master.after(100, self.process_queue())
+            elif msg == "detailed scan finished":
+                self.scanrunning = 0
+                self.scanvar.set("Detailed Scan finished")
         except queue.Empty:
             self.master.after(100, self.process_queue)
 
@@ -83,29 +88,28 @@ class ThreadedScan(threading.Thread):  # class for intial ip scan
     def run(self):
         # run an nmap scan outputting result to a file, put task finished to
         # queue when it ends
-        report = run_scan(self.localIP)
+        report = self.run_scan(self.localIP)
         if report:
             print_scan(report)
             add_hosts_to_list(report, ips)
             # get_ips_from_scan(report)
         else:
             print("No results returned")
-        self.queue.put("Task finished")
+        self.queue.put("Initial scan finished")
 
-
-def run_scan(IP):
+    def run_scan(self, IP):
         # self.queue.put("Starting scan for: " + self.localIP)
-    parsed = None
-    nmproc = NmapProcess(IP, "-sP")
-    rc = nmproc.run()
-    if rc != 0:
-        print("nmap scan failed: {0}".format(nmproc.stderr))
-    # print(type(nmproc.stdout))
-    try:
-        parsed = NmapParser.parse(nmproc.stdout)
-    except NmapParserException as e:
-        print("Exception raised while parsing scan: {0}".format(e.msg))
-    return parsed
+        parsed = None
+        nmproc = NmapProcess(IP, "-sP")
+        rc = nmproc.run()
+        if rc != 0:
+            print("nmap scan failed: {0}".format(nmproc.stderr))
+            # print(type(nmproc.stdout))
+        try:
+            parsed = NmapParser.parse(nmproc.stdout)
+        except NmapParserException as e:
+            print("Exception raised while parsing scan: {0}".format(e.msg))
+        return parsed
 
 
 def print_scan(nmap_report):
@@ -145,10 +149,42 @@ def add_hosts_to_list(nmap_report, ip_list):
 
 
 class Threaded_detailed_scan(threading.Thread):
-    def __init__(self, queue, dev_ip):
+    def __init__(self, queue):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.dev_ip = dev_ip
+
+    def run(self):
+        # run a detailed scan on each ip in the ips list
+        self.run_scan()
+        self.print_detailed_scans()
+        self.queue.put("detailed scan finished")
+
+    def run_scan(self):
+        for ip in ips:
+            parsed = None
+            target = ip.address
+            print("performing detailed scan for {0}".format(target))
+            nmproc = NmapProcess(target, "-A")
+            rc = nmproc.run()
+            if rc != 0:
+                print("nmap scan failed: {0}".format(nmproc.stderr))
+                # print(type(nmproc.stdout))
+            try:
+                parsed = NmapParser.parse(nmproc.stdout)
+            except NmapParserException as e:
+                print("Exception raised while parsing scan: {0}".format(e.msg))
+            detailed_ips[target] = parsed
+
+    def print_detailed_scans(self):
+        for ip, report in detailed_ips.items():
+            for host in report.hosts:
+                if len(host.hostnames):
+                    tmp_host = host.hostnames[0]
+                else:
+                    tmp_host = host.address
+                if host.is_up():
+                    print("Detailed report for {0} ({1})".format(tmp_host,
+                                                                 host.address))
 
 
 root = Tk()
