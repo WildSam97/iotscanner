@@ -5,6 +5,7 @@ from libnmap.parser import NmapParser, NmapParserException
 import socket
 import threading
 import queue
+import urllib.request
 # import xml.etree.ElementTree as ET
 
 ips = []
@@ -31,8 +32,14 @@ class scan_GUI():
         self.scan_button = Button(master, text="Start scan",
                                   command=self.startscan)
         self.scan_button.pack()
+        # listbox for ip addresses
         self.ipList = Listbox(master, width=100)
         self.ipList.pack()
+        # button to download CVE data (TEST)
+        self.download_button = Button(master,
+                                      text="download vulnerability list",
+                                      command=download_vulnerability_list)
+        self.download_button.pack()
 
     def startscan(self):
         if self.scanrunning:
@@ -185,6 +192,26 @@ class Threaded_detailed_scan(threading.Thread):
                 if host.is_up():
                     print("Detailed report for {0} ({1})".format(tmp_host,
                                                                  host.address))
+                    print("Vendor is {0}".format(host.vendor))
+                    for serv in host.services:
+                        pserv = "{0:>5s}/{1:3s}  {2:12s}  {3}".format(
+                                str(serv.port),
+                                serv.protocol,
+                                serv.state,
+                                serv.service)
+                        if len(serv.banner):
+                            pserv += " ({0})".format(serv.banner)
+                        print(pserv)
+
+
+def download_vulnerability_list():
+    # method to download the mitre cve file
+    print("Downloading vulnerability data")
+    vul_url = "https://cve.mitre.org/data/downloads/allitems.csv"
+    with urllib.request.urlopen(vul_url) as response, \
+            open("Mitre_CVE_database.csv", 'wb') as out_file:
+                data = response.read()
+                out_file.write(data)
 
 
 root = Tk()
