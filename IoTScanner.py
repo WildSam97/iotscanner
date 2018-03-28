@@ -7,6 +7,7 @@ import threading
 import queue
 import urllib.request
 # import xml.etree.ElementTree as ET
+import re
 
 ips = []
 detailed_ips = {}
@@ -206,12 +207,43 @@ class Threaded_detailed_scan(threading.Thread):
 
 def download_vulnerability_list():
     # method to download the mitre cve file
-    print("Downloading vulnerability data")
-    vul_url = "https://cve.mitre.org/data/downloads/allitems.csv"
-    with urllib.request.urlopen(vul_url) as response, \
-            open("Mitre_CVE_database.csv", 'wb') as out_file:
+    # check if the file needs updating first
+    last_updated = ""
+    # read the last time list was updated from file
+    try:
+        with open("last_updated.txt", 'r') as update_file:
+            last_updated = update_file.read()
+            print(last_updated)
+    except IOError:  # if the file doesn't exist it has never been updated
+        # so set the last updated date to 0 to force a download
+        print("Never Downloaded Vulnerability list")
+        last_updated = "0"
+
+    index_url = "https://cve.mitre.org/data/downloads/index.html"
+    # check the index of the mitre list to see when it was last generated
+    check_page = urllib.request.urlopen(index_url).read().decode("utf8")
+    try:
+        last_generated = re.search(
+            'CVE downloads data last generated:\\n(.+?)\n\n',
+            check_page).group(1)
+    except AttributeError:
+        last_generated = "0"  # if for some reason it is not available set this
+        # to 0 so that it does not attempt a download
+    print(last_generated)
+    last_generated = last_generated.replace("-", "")
+    print(last_generated)
+    # if it has been generated since it was last updated then download it
+    if int(last_updated) < int(last_generated):
+        print("Downloading latest vulnerability data")
+        vul_url = "https://cve.mitre.org/data/downloads/allitems.csv"
+        with urllib.request.urlopen(vul_url) as response, \
+                open("Mitre_CVE_database.csv", 'wb') as out_file:
                 data = response.read()
                 out_file.write(data)
+        with open("last_updated.txt", 'w') as update_file:
+            update_file.write(last_generated)
+    else:
+        print("Vulnerability data already up to date")
 
 
 root = Tk()
