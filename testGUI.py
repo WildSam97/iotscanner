@@ -47,23 +47,13 @@ class main_GUI:
         self.devices_frame.pack(side=tk.TOP)
         # list of devices (device frames)
         self.device_list = []
+        # add a bunch of test devices
         for i in range(0, 15):
             self.device_list.append(
                 device_frame(
                     self.devices_frame,
                     i,
-                    i))
-            # self.devices_frame.rowconfigure(i, {'minsize': 70})
-    # can iterate through devices via self.device_list, and move them around:
-        self.device_list[1].dev_frame.grid(row=5)
-        self.device_list[5].dev_frame.grid(row=1)
-    #    for device in self.device_list:
-    #        row = device.dev_frame.grid_info()['row']
-    #        if row - 1 < 0:
-    #            device.dev_frame.grid_forget()
-    #        else:
-    #            row = row - 1
-    #            device.dev_frame.grid(row=row)
+                    "this is a random long string {0}".format(i)))
         # frame for the scroll buttons
         self.scroll_frame = tk.Frame(root)
         self.scroll_frame.pack(side=tk.TOP)
@@ -86,12 +76,12 @@ class main_GUI:
         canscroll = 0
         for device in self.device_list:
             if ((device.index < 0 and amount > 0)
-               or (device.index > 9 and amount < 0)):
+               or (device.index > 5 and amount < 0)):
                     canscroll = 1
         if canscroll == 1:
             for device in self.device_list:
                 device.index = device.index + amount
-                if device.index < 0 or device.index > 9:
+                if device.index < 0 or device.index > 5:
                     device.dev_frame.grid_forget()
                 else:
                     device.dev_frame.grid(row=device.index)
@@ -101,51 +91,109 @@ class main_GUI:
 class device_frame:
     def __init__(self, master, index, dev_ip):
         self.master = master
-        self.index = index
+        self.index = index  # index relative to the grid
+        # name of the device (can be edited by user)
+        self.device_name = tk.StringVar()
+        self.device_name.set(dev_ip)
         # frame to hold this device
         self.dev_frame = tk.Frame(self.master,
                                   padx=5,
                                   pady=5,
                                   borderwidth=2,
                                   relief="groove")
-        if self.index >= 0 and self.index <= 9:
+        # only add first few devices to the grid
+        if self.index >= 0 and self.index <= 5:
             self.dev_frame.grid(row=self.index)
-        # frame for device info
-        # self.info_frame = tk.Frame(self.dev_frame)
-        # self.info_frame.grid(column=1, row=0)
         # ip address Label
         self.dev_ip_label = tk.Label(self.dev_frame,
                                      text="IP Address: {0}".format(dev_ip))
-        self.dev_ip_label.grid(row=0, column=0)
+        self.dev_ip_label.grid(row=0, column=0, padx=2, pady=2, sticky=tk.W)
         # vendor Label
         self.vendor_label = tk.Label(self.dev_frame,
                                      text="Vendor: {0}".format(dev_ip))
-        self.vendor_label.grid(row=1, column=0)
+        self.vendor_label.grid(row=1, column=0, padx=2, pady=2, sticky=tk.W)
         # editable device name
-        # start with a label, edit button changes it to an entry, save changes
-        # the label text?
-
-        # divider?
-
-        # frame for vulnerability info
-        # self.vuln_frame = tk.Frame(self.dev_frame)
-        # self.vuln_frame.grid(column=2, row=0)
+        # label to present name
+        self.device_name_label = tk.Label(
+            self.dev_frame,
+            text="Device Name: {0}".format(self.device_name.get()))
+        self.device_name_label.grid(
+            row=2, column=0, padx=2, pady=2, sticky=tk.W)
+        # button to edit device name
+        self.device_name_button = tk.Button(self.dev_frame,
+                                            text="Edit device name",
+                                            command=self.edit_device_name
+                                            )
+        self.device_name_button.grid(row=0,
+                                     column=3, padx=2, pady=2, sticky=tk.E)
+        # entry for user to set device name
+        self.device_name_entry = tk.Entry(self.dev_frame,
+                                          textvariable=self.device_name,
+                                          width=30)
+        # save changes buttons
+        self.save_changes_button = tk.Button(
+            self.dev_frame,
+            text="Save changes",
+            command=self.save_device_name)
+        # cancel changes button
+        self.cancel_changes_button = tk.Button(self.dev_frame,
+                                               text="Cancel changes",
+                                               command=self.cancel_device_name)
         # open port Label
         self.port_label = tk.Label(self.dev_frame,
                                    text="Open ports: {0}".format(dev_ip))
-        self.port_label.grid(row=0, column=1)
+        self.port_label.grid(row=0, column=2, sticky=tk.W)
         # potential vulnerabilities Label
         self.vuln_label = tk.Label(
             self.dev_frame,
             text="Potential vulnerabilities: {0}".format(dev_ip))
-        self.vuln_label.grid(row=1, column=1)
+        self.vuln_label.grid(row=1, column=2, padx=2, pady=2, sticky=tk.W)
         # another divider?
         # show details button
         self.details_button = tk.Button(self.dev_frame, text="Show Details")
-        self.details_button.grid(row=1, column=2)
+        self.details_button.grid(row=2, column=3, padx=2, pady=2, sticky=tk.E)
 
+    # function to edit device name
+    def edit_device_name(self):
+        # hide the name and edit buttons
+        self.device_name_label.grid_forget()
+        self.device_name_button.grid_forget()
+        # show entry, save and cancel buttons
+        self.cancel_changes_button.grid(
+            row=1, column=3, padx=2, pady=2, sticky=tk.E)
+        self.save_changes_button.grid(
+            row=0, column=3, padx=2, pady=2, sticky=tk.E)
+        self.device_name_entry.grid(
+            row=2, column=0, padx=2, pady=2, sticky=tk.W)
+        self.tempName = self.device_name.get()
 
-# class for scrollable frame for multiple device frames?
+    # function to save change to device name
+    def save_device_name(self):
+        # self.device_name.set(name)
+        self.device_name_label['text'] = "Device Name: {0}".format(
+                                                    self.device_name.get())
+        # hide cancel, save and entry
+        self.cancel_changes_button.grid_forget()
+        self.save_changes_button.grid_forget()
+        self.device_name_entry.grid_forget()
+        # show device name label and edit button
+        self.device_name_label.grid(
+            row=2, column=0, padx=2, pady=2, sticky=tk.W)
+        self.device_name_button.grid(row=0,
+                                     column=3, padx=2, pady=2, sticky=tk.E)
+
+    # function to cancel changes to device name
+    def cancel_device_name(self):
+        # hide cancel, save and entry
+        self.cancel_changes_button.grid_forget()
+        self.save_changes_button.grid_forget()
+        self.device_name_entry.grid_forget()
+        self.device_name.set(self.tempName)
+        # show device name label and edit button
+        self.device_name_label.grid(
+            row=2, column=0, padx=2, pady=2, sticky=tk.W)
+        self.device_name_button.grid(row=0,
+                                     column=3, padx=2, pady=2, sticky=tk.E)
 
 
 root = tk.Tk()
