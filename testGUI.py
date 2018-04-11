@@ -1,11 +1,22 @@
+# GUI imports
 import tkinter as tk
 from tkinter.font import Font
 from tkinter import ttk as ttk
+# other imports
+import socket
+import queue
+import threading
+from libnmap.process import NmapProcess
+from libnmap.parser import NmapParser, NmapParserException
 
+initial_scan_results = []
 
 class main_GUI:
     def __init__(self, master):
+        # varible to toggle if a scan is running
+        self.scan_running = 0
         self.master = master
+        # title of window
         master.title("IoT device Scanner")
         # main frame to hold all other items
         self.main_frame = tk.Frame(root)
@@ -23,15 +34,28 @@ class main_GUI:
                                    borderwidth=2,
                                    relief='groove')
         self.scan_frame.grid(row=1, column=1)
+        # frame for general info
+        self.info_frame = tk.Frame(self.scan_frame,
+                                   padx=5,
+                                   pady=5,
+                                   borderwidth=2)
+        self.info_frame.grid(row=0, column=0)
         # last scan date label & variable
         self.last_scan_var = tk.StringVar()
         self.last_scan_var.set("Last scan date: Never")
-        self.last_scan_label = tk.Label(self.scan_frame,
+        self.last_scan_label = tk.Label(self.info_frame,
                                         textvariable=self.last_scan_var)
         self.last_scan_label.grid(row=0, column=0, padx=2, pady=2)
+        # label for this device's ip address
+        self.my_ip_var = tk.StringVar()
+        self.my_ip_var.set("This machine's IP: Scan not run")
+        self.my_ip_label = tk.Label(self.info_frame,
+                                    textvariable=self.my_ip_var)
+        self.my_ip_label.grid(row=1, column=0, padx=2, pady=2)
         # button to run a new scan
         self.scan_button = tk.Button(self.scan_frame,
-                                     text="Run Scan")
+                                     text="Run Scan",
+                                     command=self.start_scan)
         self.scan_button.grid(row=0, column=2, padx=2, pady=2)
         # frame for scan progress stuff
         self.progress_frame = tk.Frame(self.scan_frame)
@@ -63,6 +87,7 @@ class main_GUI:
             self.device_list.append(
                 device_frame(
                     self.devices_frame,
+                    self,
                     i,
                     "192.168.0.{0}".format(i),
                     "Seiko Epson",
@@ -109,8 +134,6 @@ class main_GUI:
                                           self.password_frame.password_frame
                                          ))
         self.password_button.grid(row=3, sticky='NEW')
-        # frame for scan detail
-        self.scan_details_frame = details_frame(self.main_frame, "192.168.1.1")
         # frame for searching CVEs
         self.search_frame = search_frame(self.main_frame)
         # frame for password checker
@@ -137,24 +160,49 @@ class main_GUI:
 
     # function to switch the main frame being displayed
     def switch_frames(self, new_frame):
-        self.scan_details_frame.details_frame.grid_forget()
         self.password_frame.password_frame.grid_forget()
         self.search_frame.search_frame.grid_forget()
         self.scroll_devices_frame.grid_forget()
+        self.scan_details_frame.details_frame.grid_forget()
         new_frame.grid(
             row=2,
             column=1,
             padx=2,
             pady=2)
     # end of switch_frames function
+
+    # function for start scan button
+    def start_scan(self):
+            # set the status bar to show a scan is running
+            self.status_var.set("Inital scan running")
+            # disable to scan button so the user can't start another one
+            self.scan_button['state'] = "disabled"
+            # use google dns and sockets to find ip of current device
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('8.8.8.8', 53))
+            localIP = s.getsockname()[0]
+            self.my_ip_var.set("This machine's IP: {0}".format(localIP))
+            # append /24 to scan subnet device in on
+            localIP = localIP + '/24'
+            # queue for messages from other threads
+            self.queue = queue.Queue()
+            # start initial scan
+
+    # end of start scan function
+
+    # function to process queue of events from other threads
+
+    # end of process_queue function
+
 # end of main_GUI class
 
 
 # class for frame that contains info for specific device
 class device_frame:
-    def __init__(self, master, index, dev_ip, dev_vendor,
+    def __init__(self, master, container, index, dev_ip, dev_vendor,
                  dev_name, dev_vuln, dev_ports):
         self.master = master
+        self.container = container
         self.index = index  # index relative to the grid
         # name of the device (can be edited by user)
         self.device_name = tk.StringVar()
@@ -222,7 +270,8 @@ class device_frame:
         # show details button
         self.details_button = tk.Button(
             self.dev_frame,
-            text="Show Details")
+            text="Show Details",
+            command=self.show_details)
         self.details_button.grid(row=2, column=3, padx=2, pady=2, sticky=tk.E)
     # end of __init__ function
 
@@ -271,6 +320,20 @@ class device_frame:
         self.device_name_button.grid(row=0,
                                      column=3, padx=2, pady=2, sticky=tk.E)
     # end of cancel_device_name function
+
+    # function to show details for a device
+    def show_details(self):
+        self.container.scroll_devices_frame.grid_forget()
+        self.container.scan_details_frame = details_frame(
+            self.container.main_frame,
+            self.ip_address)
+        self.container.scan_details_frame.details_frame.grid(
+            row=2,
+            column=1,
+            padx=2,
+            pady=2)
+        # end of show_details function
+
 # end of device_frame class
 
 
@@ -303,6 +366,7 @@ class search_frame:
 # end of search_frame class
 
 
+# class for frame to allow testing of passwords
 class password_frame:
     def __init__(self, master):
         self.master = master
@@ -314,6 +378,55 @@ class password_frame:
         self.title_label.pack(side='top')
     # end of __init__ function
 # end of password_frame class
+
+
+# threaded class for initial scan (device detection)
+class threaded_initial_scan(threading.Thread):
+    def __init__(self, queue, localIP):
+        threading.Thread.__init__(self)
+        self.queue = queue
+        self.localIP = localIP
+    # end of __init__ function
+
+    # main function called when thread is started
+    def run(self):
+        # run a basic nmap scan to discover devices
+        report = self.run_scan(self.localIP)
+        if report:
+            print_scan(report)
+            # add the initial scan details to the GUI
+        # add message to queue to state that initial scan is done
+        self.queue.put("Initial scan finished")
+    # end of run function
+
+    # function to run the scan
+    def run_scan(self, IP):
+        parsed = None
+        nmproc = NmapProcess(IP, "-sP")
+        rc = nmproc.run()
+        if rc != 0:
+            print("nmap scan failed: {0}".format(nmproc.stderr))
+        try:
+            parsed = NmapParser.parse(nmproc.stdout)
+        except NmapParserException as e:
+            print("Exception raised while parsing scan: {0}". format(e.msg))
+        return parsed
+    # end of run_scan function
+
+
+def print_scan(nmap_report):
+    for host in nmap_report.hosts:
+        if len(host.hostnames):
+            tmp_host = host.hostnames[0]
+        else:
+            tmp_host = host.address
+
+        if host.is_up():
+            print("Nmap scan report for {0} ({1})".format(tmp_host,
+                                                          host.address))
+            print("Host is {0}.".format(host.status))
+            if host.vendor:
+                print("Vendor is {0}.".format(host.vendor))
 
 
 root = tk.Tk()
