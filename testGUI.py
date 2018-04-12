@@ -9,7 +9,9 @@ import threading
 from libnmap.process import NmapProcess
 from libnmap.parser import NmapParser, NmapParserException
 
-initial_scan_results = []
+ips = []
+initial_scan_results = {}
+
 
 class main_GUI:
     def __init__(self, master):
@@ -72,31 +74,20 @@ class main_GUI:
         self.status_label.grid(row=1, padx=2, pady=2)
         # frame for scroll and devices
         self.scroll_devices_frame = tk.Frame(self.main_frame)
-        self.scroll_devices_frame.grid(row=2, column=1, padx=2, pady=2)
+        self.scroll_devices_frame.grid(row=2, column=1, padx=2, pady=2,
+                                       sticky='NSWE')
         # devices_frame title
         self.scroll_title = tk.Label(self.scroll_devices_frame,
                                      text="Device List")
-        self.scroll_title.grid(row=0, column=0)
+        self.scroll_title.grid(row=0, column=0, sticky='WE')
         # frame for device info
         self.devices_frame = tk.Frame(self.scroll_devices_frame)
-        self.devices_frame.grid(row=1, column=0)
+        self.devices_frame.grid(row=1, column=0, sticky='WE')
         # list of devices (device frames)
         self.device_list = []
-        # add a bunch of test devices
-        for i in range(0, 15):
-            self.device_list.append(
-                device_frame(
-                    self.devices_frame,
-                    self,
-                    i,
-                    "192.168.0.{0}".format(i),
-                    "Seiko Epson",
-                    "A printer",
-                    2,
-                    5))
         # frame for the scroll buttons
         self.scroll_frame = tk.Frame(self.scroll_devices_frame)
-        self.scroll_frame.grid(row=1, column=1, sticky='NS')
+        self.scroll_frame.grid(row=1, column=1, sticky='NSE')
         # scroll up
         self.scroll_up_button = tk.Button(
             self.scroll_frame,
@@ -138,6 +129,21 @@ class main_GUI:
         self.search_frame = search_frame(self.main_frame)
         # frame for password checker
         self.password_frame = password_frame(self.main_frame)
+        # dummy frame for detailed view (in case nav used before scan is run)
+        self.scan_details_frame = details_frame(self.main_frame, 0)
+
+        # add a bunch of test devices
+        # for i in range(0, 15):
+        #     self.device_list.append(
+        #         device_frame(
+        #             self.devices_frame,
+        #             self,
+        #            i,
+        #            "192.168.0.{0}".format(i),
+        #            "Seiko Epson",
+        #            "A printer",
+        #            2,
+        #            5))
     # end of __init__ function
 
     # method to scroll/cycle through the devices in the device list
@@ -183,16 +189,80 @@ class main_GUI:
             localIP = s.getsockname()[0]
             self.my_ip_var.set("This machine's IP: {0}".format(localIP))
             # append /24 to scan subnet device in on
-            localIP = localIP + '/24'
+            self.target_range = localIP + '/24'
             # queue for messages from other threads
             self.queue = queue.Queue()
+            # counter for initial scan passes
+            self.num_scans = 0
             # start initial scan
-
+            threaded_initial_scan(self.queue, self.target_range).start()
+            self.master.after(100, self.process_queue)
     # end of start scan function
 
     # function to process queue of events from other threads
-
+    def process_queue(self):
+        try:
+            # get the latest message from the queue
+            msg = self.queue.get(0)
+            print(msg)
+            if msg == "Initial scan finished":
+                # update progress status and bar
+                self.num_scans += 1
+                text = "Initial scan {0} finished".format(self.num_scans)
+                self.status_var.set(text)
+                self.scan_progress.step(10)
+                if self.num_scans < 3:
+                    threaded_initial_scan(self.queue,
+                                          self.target_range).start()
+                    self.master.after(100, self.process_queue)
+                elif self.num_scans == 3:
+                    self.display_initial_results()
+                    self.status_var.set(
+                        "Initial scans finished - starting detailed scans")
+                    self.num_detailed_scans = 0
+                    # start a detailed scan for each device
+                    print("starting detailed scans")
+                #    for ip, host in initial_scan_results.items():
+                #        if host.is_up():
+                #            threaded_detailed_scan(self.queue, ip).start()
+                    threaded_detailed_scan(self.queue, ips[0]).start()
+                    self.master.after(100, self.process_queue)
+            elif msg == "detailed scan finished":
+                self.num_detailed_scans += 1
+                text = "{0}/{1} detailed scans complete".format(
+                    self.num_detailed_scans, len(initial_scan_results.keys()))
+                self.status_var.set(text)
+                if self.num_detailed_scans == len(initial_scan_results.keys()):
+                    self.status_var.set("Detailed scans complete")
+                else:
+                    threaded_detailed_scan(
+                        self.queue,
+                        ips[self.num_detailed_scans]).start()
+                self.master.after(100, self.process_queue)
+        except queue.Empty:
+            self.master.after(100, self.process_queue)
     # end of process_queue function
+
+    # function to display initial scan results on gui
+    def display_initial_results(self):
+        print("Adding intial results to gui")
+        for ip, host in initial_scan_results.items():
+            if len(host.hostnames):
+                tmp_host = host.hostnames[0]
+            else:
+                tmp_host = host.address
+            if host.is_up():
+                self.device_list.append(
+                    device_frame(
+                        self.devices_frame,
+                        self,
+                        len(self.device_list),
+                        host.address,
+                        host.vendor,
+                        tmp_host,
+                        "-",
+                        "-"))
+    # end of display initial results function
 
 # end of main_GUI class
 
@@ -386,6 +456,7 @@ class threaded_initial_scan(threading.Thread):
         threading.Thread.__init__(self)
         self.queue = queue
         self.localIP = localIP
+        print("Starting initial scan")
     # end of __init__ function
 
     # main function called when thread is started
@@ -393,8 +464,13 @@ class threaded_initial_scan(threading.Thread):
         # run a basic nmap scan to discover devices
         report = self.run_scan(self.localIP)
         if report:
+            # debug print report
             print_scan(report)
-            # add the initial scan details to the GUI
+            # add report contents to the results if not already there
+            for host in report.hosts:
+                if host.address not in ips and host.is_up():
+                    initial_scan_results[host.address] = host
+                    ips.append(host.address)
         # add message to queue to state that initial scan is done
         self.queue.put("Initial scan finished")
     # end of run function
@@ -412,9 +488,46 @@ class threaded_initial_scan(threading.Thread):
             print("Exception raised while parsing scan: {0}". format(e.msg))
         return parsed
     # end of run_scan function
+# end of threaded_initial_scan class
 
 
+# threaded class for detailed scans (open port & OS detection)
+class threaded_detailed_scan(threading.Thread):
+    def __init__(self, queue, target_ip):
+        threading.Thread.__init__(self)
+        self.queue = queue
+        self.target_ip = target_ip
+        print("performing detailed scan for {0}".format(self.target_ip))
+    # end of __init__ function
+
+    def run(self):
+        print("run for {0}".format(self.target_ip))
+        report = self.run_scan(self.target_ip)
+        if report:
+            print_scan(report)
+        self.queue.put("detailed scan finished")
+    # end of run function
+
+    def run_scan(self, IP):
+        print("scanning for {0}".format(IP))
+        parsed = None
+        nmproc = NmapProcess(IP, "-A", "-Pn")
+        rc = nmproc.run()
+        if rc != 0:
+            print("nmap scan failed: {0}".format(nmproc.stderr))
+        try:
+            parsed = NmapParser.parse(nmproc.stdout)
+        except NmapParserException as e:
+            print("Exception raised while parsing scan: {0}".format(e.msg))
+        return parsed
+    # end of run_scan function
+
+# end of threaded_detailed_scan class
+
+
+# function to print out scan results to console (used for debug)
 def print_scan(nmap_report):
+    # loop through each host, print out basic info for host
     for host in nmap_report.hosts:
         if len(host.hostnames):
             tmp_host = host.hostnames[0]
