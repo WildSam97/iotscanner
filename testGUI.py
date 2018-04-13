@@ -11,6 +11,7 @@ from libnmap.parser import NmapParser, NmapParserException
 
 ips = []
 initial_scan_results = {}
+detailed_scan_results = {}
 
 
 class main_GUI:
@@ -84,7 +85,7 @@ class main_GUI:
         self.devices_frame = tk.Frame(self.scroll_devices_frame)
         self.devices_frame.grid(row=1, column=0, sticky='WE')
         # list of devices (device frames)
-        self.device_list = []
+        self.device_list = {}
         # frame for the scroll buttons
         self.scroll_frame = tk.Frame(self.scroll_devices_frame)
         self.scroll_frame.grid(row=1, column=1, sticky='NSE')
@@ -150,13 +151,13 @@ class main_GUI:
     def scroll_devices(self, amount):
         # check if we need to scroll
         canscroll = 0
-        for device in self.device_list:
+        for ip, device in self.device_list.items():
             if ((device.index < 0 and amount > 0)
                or (device.index > 5 and amount < 0)):
                     canscroll = 1
         # if we do then scroll
         if canscroll == 1:
-            for device in self.device_list:
+            for ip, device in self.device_list.items():
                 device.index = device.index + amount
                 if device.index < 0 or device.index > 5:
                     device.dev_frame.grid_forget()
@@ -228,6 +229,7 @@ class main_GUI:
                     threaded_detailed_scan(self.queue, ips[0]).start()
                     self.master.after(100, self.process_queue)
             elif msg == "detailed scan finished":
+                self.display_detailed_results(ips[self.num_detailed_scans])
                 self.num_detailed_scans += 1
                 text = "{0}/{1} detailed scans complete".format(
                     self.num_detailed_scans, len(initial_scan_results.keys()))
@@ -252,25 +254,41 @@ class main_GUI:
             else:
                 tmp_host = host.address
             if host.is_up():
-                self.device_list.append(
-                    device_frame(
+                # self.device_list.append(
+                tmp_device = device_frame(
                         self.devices_frame,
                         self,
-                        len(self.device_list),
+                        len(self.device_list.keys()),
                         host.address,
                         host.vendor,
                         tmp_host,
                         "-",
-                        "-"))
+                        "-",
+                        "-")
+                self.device_list[host.address] = tmp_device
     # end of display initial results function
 
+    # function to add detailed scan info to display
+    def display_detailed_results(self, device_ip):
+        print("adding detailed info to gui")
+        host = detailed_scan_results[device_ip]
+        dev_frame = self.device_list[host.address]
+        port_count = len(host.get_open_ports())
+        dev_frame.port_label['text'] = "Open ports: {0}".format(port_count)
+        try:
+            dev_frame.OS_label['text'] = "Operating System: {0}".format(
+                host.os_match_probabilities()[0].name
+            )
+        except Exception:
+            dev_frame.OS_label['text'] = "Operating System: unknown"
+    # end of display_detailed_results function
 # end of main_GUI class
 
 
 # class for frame that contains info for specific device
 class device_frame:
     def __init__(self, master, container, index, dev_ip, dev_vendor,
-                 dev_name, dev_vuln, dev_ports):
+                 dev_name, dev_vuln, dev_ports, os):
         self.master = master
         self.container = container
         self.index = index  # index relative to the grid
@@ -337,6 +355,10 @@ class device_frame:
             self.dev_frame,
             text="Potential vulnerabilities: {0}".format(dev_vuln))
         self.vuln_label.grid(row=1, column=2, padx=2, pady=2, sticky=tk.W)
+        # OS Label
+        self.OS_label = tk.Label(self.dev_frame,
+                                 text="Operating System: {0}".format(os))
+        self.OS_label.grid(row=2, column=2, padx=2, pady=2, sticky=tk.W)
         # show details button
         self.details_button = tk.Button(
             self.dev_frame,
@@ -504,14 +526,19 @@ class threaded_detailed_scan(threading.Thread):
         print("run for {0}".format(self.target_ip))
         report = self.run_scan(self.target_ip)
         if report:
+            # print scan result (debug)
             print_scan(report)
+            # add each host to the detailed results
+            for host in report.hosts:
+                detailed_scan_results[host.address] = host
+        # add message to queue to say detailed scan is done
         self.queue.put("detailed scan finished")
     # end of run function
 
     def run_scan(self, IP):
         print("scanning for {0}".format(IP))
         parsed = None
-        nmproc = NmapProcess(IP, "-A", "-Pn")
+        nmproc = NmapProcess(IP, options="-A -T4 p1-65535")
         rc = nmproc.run()
         if rc != 0:
             print("nmap scan failed: {0}".format(nmproc.stderr))
