@@ -8,10 +8,15 @@ import queue
 import threading
 from libnmap.process import NmapProcess
 from libnmap.parser import NmapParser, NmapParserException
+import urllib.request
+import re
+from datetime import date
+import csv
 
 ips = []
 initial_scan_results = {}
 detailed_scan_results = {}
+vulnerability_dict = {}
 
 
 class main_GUI:
@@ -132,7 +137,8 @@ class main_GUI:
         self.password_frame = password_frame(self.main_frame)
         # dummy frame for detailed view (in case nav used before scan is run)
         self.scan_details_frame = details_frame(self.main_frame, 0)
-
+        # check when last scan was ran
+        self.last_run()
         # add a bunch of test devices
         # for i in range(0, 15):
         #     self.device_list.append(
@@ -206,36 +212,41 @@ class main_GUI:
             # get the latest message from the queue
             msg = self.queue.get(0)
             print(msg)
+            # stage 1 - initial scans
             if msg == "Initial scan finished":
                 # update progress status and bar
                 self.num_scans += 1
                 text = "Initial scan {0} finished".format(self.num_scans)
                 self.status_var.set(text)
                 self.scan_progress.step(10)
+                # if less than 3 scans carried out do another one
+                # this increases chance a device is detected
                 if self.num_scans < 3:
                     threaded_initial_scan(self.queue,
                                           self.target_range).start()
                     self.master.after(100, self.process_queue)
+                # if 3 scans have been carried out start the detailed scans
                 elif self.num_scans == 3:
                     self.display_initial_results()
                     self.status_var.set(
                         "Initial scans finished - starting detailed scans")
                     self.num_detailed_scans = 0
-                    # start a detailed scan for each device
+                    # start a detailed scan for 1st device in list
                     print("starting detailed scans")
-                #    for ip, host in initial_scan_results.items():
-                #        if host.is_up():
-                #            threaded_detailed_scan(self.queue, ip).start()
                     threaded_detailed_scan(self.queue, ips[0]).start()
                     self.master.after(100, self.process_queue)
+            # when a detailed scan is finished
             elif msg == "detailed scan finished":
                 self.display_detailed_results(ips[self.num_detailed_scans])
                 self.num_detailed_scans += 1
                 text = "{0}/{1} detailed scans complete".format(
                     self.num_detailed_scans, len(initial_scan_results.keys()))
                 self.status_var.set(text)
+                # if all detailed scans are done start vulnerability detection
                 if self.num_detailed_scans == len(initial_scan_results.keys()):
                     self.status_var.set("Detailed scans complete")
+                    print("Starting vulnerability detection")
+                # otherwise start the scan for the next device in the list
                 else:
                     threaded_detailed_scan(
                         self.queue,
@@ -279,9 +290,64 @@ class main_GUI:
             dev_frame.OS_label['text'] = "Operating System: {0}".format(
                 host.os_match_probabilities()[0].name
             )
+            dev_frame.os_name.set(host.os_match_probabilities()[0].name)
         except Exception:
             dev_frame.OS_label['text'] = "Operating System: unknown"
+            dev_frame.os_name.set("unknown")
     # end of display_detailed_results function
+
+    # function to check when last scan was carried out
+    def last_run(self):
+        self.last_updated = ""
+
+        try:
+            with open("last_updated.txt", 'r') as update_file:
+                self.last_updated = update_file.read()
+                print(self.last_updated)
+                self.last_scan_var.set(
+                    "Last scan date: {0}".format(self.last_updated))
+        except IOError:  # if the file doesn't exist it has never been updated
+            # so set the last updated date to 0 to force a download
+            print("Never carried out a scan")
+    # end of last_run function
+
+    # function to check if vulnerability list needs updating and download
+    def check_updates(self):
+        index_url = "https://cve.mitre.org/data/downloads/index.html"
+        # check the index of the mitre list to see when it was last generated
+        check_page = urllib.request.urlopen(index_url).read().decode("utf8")
+        try:
+            last_generated = re.search(
+                'CVE downloads data last generated:\\n(.+?)\n\n',
+                check_page).group(1)
+        except AttributeError:
+            last_generated = "0"  # if for some reason it is not available set
+            # to 0 so that it does not attempt a download
+        print(last_generated)
+        tmp_last_updated = self.last_updated.replace("-", "")
+        tmp_last_generated = last_generated.replace("-", "")
+        if int(tmp_last_updated < tmp_last_generated):
+            print("Downloading latest vulnerability data")
+            vul_url = "https://cve.mitre.org/data/downloads/allitems.csv"
+            with urllib.request.urlopen(vul_url) as response, \
+                    open("Mitre_CVE_database.csv", 'wb') as out_file:
+                    data = response.read()
+                    out_file.write(data)
+        else:
+            print("Vulnerability data already up to date")
+
+        # use exploit db as well?
+        # https://github.com/offensive-security/exploit-database/raw/master/files_exploits.csv
+    # end of check_updates function
+
+    # function to update last run date to today
+    def update_last_run(self):
+        print("updating last run date")
+        today = str(date.today())
+        with open("last_updated.txt", 'w') as update_file:
+            update_file.write(today)
+        self.last_scan_var.set("Last scan date: {0}".format(today))
+    # end of update_last_run function
 # end of main_GUI class
 
 
@@ -295,6 +361,9 @@ class device_frame:
         # name of the device (can be edited by user)
         self.device_name = tk.StringVar()
         self.device_name.set(dev_name)
+        # operating system name (can be changed by user)
+        self.os_name = tk.StringVar()
+        self.os_name.set(os)
         # ip address of device (for passing device to other functions)
         self.ip_address = dev_ip
         # frame to hold this device
@@ -328,7 +397,7 @@ class device_frame:
             row=2, column=0, padx=2, pady=2, sticky=tk.W)
         # button to edit device name
         self.device_name_button = tk.Button(self.dev_frame,
-                                            text="Edit device name",
+                                            text="Edit device details",
                                             command=self.edit_device_name
                                             )
         self.device_name_button.grid(row=0,
@@ -357,8 +426,14 @@ class device_frame:
         self.vuln_label.grid(row=1, column=2, padx=2, pady=2, sticky=tk.W)
         # OS Label
         self.OS_label = tk.Label(self.dev_frame,
-                                 text="Operating System: {0}".format(os))
-        self.OS_label.grid(row=2, column=2, padx=2, pady=2, sticky=tk.W)
+                                 text="Operating System: {0}".format(os),
+                                 width=100,
+                                 anchor='w')
+        self.OS_label.grid(row=2, column=2, padx=2, pady=2, sticky='W')
+        # entry for user to set os
+        self.OS_entry = tk.Entry(self.dev_frame,
+                                 textvariable=self.os_name,
+                                 width=100)
         # show details button
         self.details_button = tk.Button(
             self.dev_frame,
@@ -372,6 +447,7 @@ class device_frame:
         # hide the name and edit buttons
         self.device_name_label.grid_forget()
         self.device_name_button.grid_forget()
+        self.OS_label.grid_forget()
         # show entry, save and cancel buttons
         self.cancel_changes_button.grid(
             row=1, column=3, padx=2, pady=2, sticky=tk.E)
@@ -379,23 +455,30 @@ class device_frame:
             row=0, column=3, padx=2, pady=2, sticky=tk.E)
         self.device_name_entry.grid(
             row=2, column=0, padx=2, pady=2, sticky=tk.W)
+        self.OS_entry.grid(
+            row=2, column=2, padx=2, pady=2, sticky=tk.W)
         # tempory name in case the change isn't saved
         self.tempName = self.device_name.get()
+        self.tempOS = self.os_name.get()
     # end of edit_device_name function
 
     # function to save change to device name
     def save_device_name(self):
         self.device_name_label['text'] = "Device Name: {0}".format(
                                                     self.device_name.get())
+        self.OS_label['text'] = "Operating System: {0}".format(
+                                                    self.os_name.get())
         # hide cancel, save and entry
         self.cancel_changes_button.grid_forget()
         self.save_changes_button.grid_forget()
         self.device_name_entry.grid_forget()
+        self.OS_entry.grid_forget()
         # show device name label and edit button
         self.device_name_label.grid(
             row=2, column=0, padx=2, pady=2, sticky=tk.W)
         self.device_name_button.grid(row=0,
                                      column=3, padx=2, pady=2, sticky=tk.E)
+        self.OS_label.grid(row=2, column=2, padx=2, pady=2, sticky='W')
     # end of save_device_name function
 
     # function to cancel changes to device name
@@ -404,13 +487,16 @@ class device_frame:
         self.cancel_changes_button.grid_forget()
         self.save_changes_button.grid_forget()
         self.device_name_entry.grid_forget()
+        self.OS_entry.grid_forget()
         # set the device name back to the old value from tempory
         self.device_name.set(self.tempName)
+        self.os_name.set(self.tempOS)
         # show device name label and edit button
         self.device_name_label.grid(
             row=2, column=0, padx=2, pady=2, sticky=tk.W)
         self.device_name_button.grid(row=0,
                                      column=3, padx=2, pady=2, sticky=tk.E)
+        self.OS_label.grid(row=2, column=2, padx=2, pady=2, sticky='W')
     # end of cancel_device_name function
 
     # function to show details for a device
@@ -452,10 +538,50 @@ class search_frame:
         self.search_frame = tk.Frame(master)
         # title label
         self.title_label = tk.Label(self.search_frame,
-                                    text="Search for vulnerabilites")
-        self.title_label.pack(side='top')
+                                    text="Search for vulnerabilites",
+                                    anchor='w')
+        self.title_label.grid(row=0, column=0, sticky='W')
+        # search entry, label and button
+        self.search_var = tk.StringVar()
+        self.search_entry = tk.Entry(self.search_frame,
+                                     textvariable=self.search_var,
+                                     width=50)
+        self.search_entry.grid(row=1, column=0, sticky='W')
+        self.search_button = tk.Button(self.search_frame,
+                                       text="Search",
+                                       padx=2,
+                                       pady=2)
+        self.search_button.grid(row=1, column=1, sticky='W')
+        # list of vulnerability frames
+        self.vulnerability_list = []
+        # label for number of results
+        self.results_label = tk.Label(
+            self.search_frame,
+            text="Found {0} results".format(len(self.vulnerability_list)))
+        # frame for found vulnerabilities
+        self.results_frame = tk.Frame(self.search_frame)
     # end of __init__ function
 # end of search_frame class
+
+
+# class for frame to show vulnerability info
+class vulnerability_frame:
+    def __init__(self, master, id, description, link):
+        self.master = master
+        # frame to hold everything
+        self.layout_frame = tk.Frame(master)
+        # label for vulnerability id
+        self.id_label = tk.Label(self.layout_frame,
+                                 text="Vulnerability ID: {0}".format(id))
+        self.id_label.grid(row=0, column=0, sticky='W')
+        # vulnerability description text
+        self.desc_text = tk.Text(self.layout_frame,
+                                 width=200,
+                                 height=5,
+                                 relief="groove")
+        self.desc_text.insert("end", description)
+    # end of __init__ function
+# end of vulnerability_frame class
 
 
 # class for frame to allow testing of passwords
@@ -568,6 +694,19 @@ def print_scan(nmap_report):
             if host.vendor:
                 print("Vendor is {0}.".format(host.vendor))
 
+
+def detect_vulnerabilities(device_name, device_os, device_ip):
+    print("Detecting vulnerabilities for: {0}".format(device_ip))
+    host = detailed_scan_results[device_ip]
+
+def lookup_vulnerability(search_term):
+    print("searching {0}".format(search_term))
+    cve_reader = csv.reader(open("Mitre_CVE_database.csv", 'r'))
+    found = []
+    for data in cve_reader:
+        if search_term in data[2]:
+            found.append(data)
+    return found
 
 root = tk.Tk()
 my_gui = main_GUI(root)
