@@ -12,6 +12,7 @@ import urllib.request
 import re
 from datetime import date
 import csv
+import webbrowser
 
 ips = []
 initial_scan_results = {}
@@ -558,57 +559,129 @@ class search_frame:
                                     anchor='w')
         self.title_label.grid(row=0, column=0, sticky='W')
         # search entry, label and button
+        self.entry_frame = tk.Frame(self.search_frame)
+        self.entry_frame.grid(row=1, column=0)
         self.search_var = tk.StringVar()
-        self.search_entry = tk.Entry(self.search_frame,
+        self.search_entry = tk.Entry(self.entry_frame,
                                      textvariable=self.search_var,
                                      width=50)
-        self.search_entry.grid(row=1, column=0, sticky='W')
-        self.search_button = tk.Button(self.search_frame,
+        self.search_entry.grid(row=0, column=0, sticky='W')
+        self.search_button = tk.Button(self.entry_frame,
                                        text="Search",
                                        command=self.perform_search,
                                        padx=2,
                                        pady=2)
-        self.search_button.grid(row=1, column=1, sticky='W')
+        self.search_button.grid(row=0, column=1, sticky='W')
         # list of vulnerability frames
         self.vulnerability_list = []
         # label for number of results
         self.results_label = tk.Label(
-            self.search_frame,
-            text="Found {0} results".format(len(self.vulnerability_list)))
+            self.search_frame)
         # frame for found vulnerabilities
-        self.results_frame = tk.Frame(self.search_frame)
+        self.scroll_results_frame = tk.Frame(self.search_frame)
+        self.scroll_results_frame.grid(row=3, column=0)
+        self.results_frame = tk.Frame(self.scroll_results_frame)
+        self.results_frame.grid(row=0, column=0)
+        # frame for the scroll buttons
+        self.scroll_frame = tk.Frame(self.scroll_results_frame)
+        self.scroll_frame.grid(row=0, column=1, sticky='NSE')
+        # scroll up
+        self.scroll_up_button = tk.Button(
+            self.scroll_frame,
+            text="^",
+            command=lambda: self.scroll_vulnerabilities(1))
+        self.scroll_up_button.pack(side=tk.TOP)
+        # scroll down
+        self.scroll_down_button = tk.Button(
+            self.scroll_frame,
+            text="v",
+            command=lambda: self.scroll_vulnerabilities(-1))
+        self.scroll_down_button.pack(side=tk.BOTTOM)
     # end of __init__ function
 
     # function to perform search
     def perform_search(self):
+        self.vulnerability_list = []
         print("searching for: {0}".format(self.search_var.get()))
         results = lookup_vulnerability(self.search_var.get())
+        # add each result to list
         for r in results:
             print(r[0])
+            link = ""
+            if r[0][:3] == "CVE":
+                base = "https://cve.mitre.org/cgi-bin/cvename.cgi?name="
+                link = "{0}{1}".format(base, r[0])
+            self.vulnerability_list.append(vulnerability_frame(
+                self.results_frame,
+                len(self.vulnerability_list),
+                r[0],
+                r[2],
+                link))
+        # label for number of results
+        self.results_label['text'] = "Found {0} results".format(
+            len(self.vulnerability_list))
+        self.results_label.grid(row=2, column=0)
+        # display in grid
+        for v in self.vulnerability_list:
+            if v.index < 6:
+                v.layout_frame.grid(row=v.index)
+    # end of perform_search function
+
+    # function to scroll through vulnerabilities
+    def scroll_vulnerabilities(self, amount):
+        # check if we need to scroll
+        canscroll = 0
+        for vulnerability in self.vulnerability_list:
+            if ((vulnerability.index < 0 and amount > 0)
+               or (vulnerability.index > 5 and amount < 0)):
+                    canscroll = 1
+        # if we do then scroll
+        if canscroll == 1:
+            for vulnerability in self.vulnerability_list:
+                vulnerability.index = vulnerability.index + amount
+                if vulnerability.index < 0 or vulnerability.index > 5:
+                    vulnerability.layout_frame.grid_forget()
+                else:
+                    vulnerability.layout_frame.grid(row=vulnerability.index)
+    # end of scroll_devices method
 # end of search_frame class
 
 
 # class for frame to show vulnerability info
 class vulnerability_frame:
-    def __init__(self, master, id, description, link):
+    def __init__(self, master, index, id, description, link):
         self.master = master
+        self.index = index
+        self.link = link
         # frame to hold everything
-        self.layout_frame = tk.Frame(master)
+        self.layout_frame = tk.Frame(master, relief='groove')
+        self.header_frame = tk.Frame(self.layout_frame)
+        self.header_frame.grid(row=0, column=0)
         # label for vulnerability id
-        self.id_label = tk.Label(self.layout_frame,
+        self.id_label = tk.Label(self.header_frame,
                                  text="Vulnerability ID: {0}".format(id))
         self.id_label.grid(row=0, column=0, sticky='W')
         # vulnerability description text
         self.desc_text = tk.Text(self.layout_frame,
-                                 width=200,
+                                 width=100,
                                  height=5,
-                                 relief="groove")
+                                 relief="groove",
+                                 wrap='word')
         self.desc_text.insert("end", description)
-        self.desc_text.grid(row=1, column=1, sticky='W')
+        self.desc_text.grid(row=1, rowspan=2, column=0, sticky='W')
         # link button (opens web browser)
-        self.link_button = tk.Button(self.layout_frame,
-                                     text="View on web")
+        self.link_button = tk.Button(self.header_frame,
+                                     text="View on web",
+                                     command=self.open_in_browser)
+        self.link_button.grid(row=0, column=1, sticky='W')
     # end of __init__ function
+
+    # function to view vulnerability on the web
+    def open_in_browser(self):
+        try:
+            webbrowser.open_new_tab(self.link)
+        except Exception:
+            print(Exception)
 # end of vulnerability_frame class
 
 
@@ -730,6 +803,8 @@ def detect_vulnerabilities(device_name, device_os, device_ip):
 
 # function to lookup a vulnerability based on a search term
 def lookup_vulnerability(search_term):
+    if search_term == "":
+        return []
     print("searching {0}".format(search_term))
     with open('Mitre_CVE_database.csv', encoding='ISO 8859-1') as database:
         cve_reader = csv.reader(database)
