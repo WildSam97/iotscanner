@@ -74,7 +74,7 @@ class main_GUI:
         self.scan_progress.grid(row=0, padx=2, pady=2)
         # status label for scan
         self.status_var = tk.StringVar()
-        self.status_var.set("Scan not currently running")
+        self.status_var.set("Setting up...")
         self.status_label = tk.Label(self.progress_frame,
                                      textvariable=self.status_var)
         self.status_label.grid(row=1, padx=2, pady=2)
@@ -139,6 +139,8 @@ class main_GUI:
         self.scan_details_frame = details_frame(self.main_frame, 0)
         # check when last scan was ran
         self.last_run()
+        # check if vulnerability databases need updating
+        self.master.after(100, self.check_updates)
         # add a bunch of test devices
         # for i in range(0, 15):
         #     self.device_list.append(
@@ -298,14 +300,14 @@ class main_GUI:
 
     # function to check when last scan was carried out
     def last_run(self):
-        self.last_updated = ""
+        self.last_scan = ""
 
         try:
-            with open("last_updated.txt", 'r') as update_file:
-                self.last_updated = update_file.read()
-                print(self.last_updated)
+            with open("last_scan.txt", 'r') as update_file:
+                self.last_scan = update_file.read()
+                print(self.last_scan)
                 self.last_scan_var.set(
-                    "Last scan date: {0}".format(self.last_updated))
+                    "Last scan date: {0}".format(self.last_scan))
         except IOError:  # if the file doesn't exist it has never been updated
             # so set the last updated date to 0 to force a download
             print("Never carried out a scan")
@@ -313,6 +315,14 @@ class main_GUI:
 
     # function to check if vulnerability list needs updating and download
     def check_updates(self):
+        print("Checking for updates")
+        try:
+            with open("last_updated.txt", 'r') as update_file:
+                self.last_updated = update_file.read()
+                print(self.last_updated)
+        except IOError:
+            print("never downloaded")
+            self.last_updated = ""
         index_url = "https://cve.mitre.org/data/downloads/index.html"
         # check the index of the mitre list to see when it was last generated
         check_page = urllib.request.urlopen(index_url).read().decode("utf8")
@@ -328,14 +338,20 @@ class main_GUI:
         tmp_last_generated = last_generated.replace("-", "")
         if int(tmp_last_updated < tmp_last_generated):
             print("Downloading latest vulnerability data")
+            self.status_var.set("Downloading vulnerability information")
             vul_url = "https://cve.mitre.org/data/downloads/allitems.csv"
             with urllib.request.urlopen(vul_url) as response, \
                     open("Mitre_CVE_database.csv", 'wb') as out_file:
                     data = response.read()
                     out_file.write(data)
+            today = str(date.today())
+            with open("last_updated.txt", 'w') as update_file:
+                update_file.write(today)
+            self.status_var.set("Ready to Scan")
+            print("Download finished")
         else:
             print("Vulnerability data already up to date")
-
+            self.status_var.set("Ready to Scan")
         # use exploit db as well?
         # https://github.com/offensive-security/exploit-database/raw/master/files_exploits.csv
     # end of check_updates function
@@ -344,7 +360,7 @@ class main_GUI:
     def update_last_run(self):
         print("updating last run date")
         today = str(date.today())
-        with open("last_updated.txt", 'w') as update_file:
+        with open("last_scan.txt", 'w') as update_file:
             update_file.write(today)
         self.last_scan_var.set("Last scan date: {0}".format(today))
     # end of update_last_run function
@@ -549,6 +565,7 @@ class search_frame:
         self.search_entry.grid(row=1, column=0, sticky='W')
         self.search_button = tk.Button(self.search_frame,
                                        text="Search",
+                                       command=self.perform_search,
                                        padx=2,
                                        pady=2)
         self.search_button.grid(row=1, column=1, sticky='W')
@@ -561,6 +578,13 @@ class search_frame:
         # frame for found vulnerabilities
         self.results_frame = tk.Frame(self.search_frame)
     # end of __init__ function
+
+    # function to perform search
+    def perform_search(self):
+        print("searching for: {0}".format(self.search_var.get()))
+        results = lookup_vulnerability(self.search_var.get())
+        for r in results:
+            print(r[0])
 # end of search_frame class
 
 
@@ -580,6 +604,10 @@ class vulnerability_frame:
                                  height=5,
                                  relief="groove")
         self.desc_text.insert("end", description)
+        self.desc_text.grid(row=1, column=1, sticky='W')
+        # link button (opens web browser)
+        self.link_button = tk.Button(self.layout_frame,
+                                     text="View on web")
     # end of __init__ function
 # end of vulnerability_frame class
 
@@ -697,16 +725,24 @@ def print_scan(nmap_report):
 
 def detect_vulnerabilities(device_name, device_os, device_ip):
     print("Detecting vulnerabilities for: {0}".format(device_ip))
-    host = detailed_scan_results[device_ip]
+    # host = detailed_scan_results[device_ip]
 
+
+# function to lookup a vulnerability based on a search term
 def lookup_vulnerability(search_term):
     print("searching {0}".format(search_term))
-    cve_reader = csv.reader(open("Mitre_CVE_database.csv", 'r'))
-    found = []
-    for data in cve_reader:
-        if search_term in data[2]:
-            found.append(data)
-    return found
+    with open('Mitre_CVE_database.csv', encoding='ANSI') as database:
+        cve_reader = csv.reader(database)
+        found = []
+        for data in cve_reader:
+            try:
+                if search_term in data[2]:
+                    found.append(data)
+            except Exception:
+                print(Exception)
+        return found
+# end of lookup_vulnerability function
+
 
 root = tk.Tk()
 my_gui = main_GUI(root)
