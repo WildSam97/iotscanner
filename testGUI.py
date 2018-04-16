@@ -731,7 +731,7 @@ def detect_vulnerabilities(device_name, device_os, device_ip):
 # function to lookup a vulnerability based on a search term
 def lookup_vulnerability(search_term):
     print("searching {0}".format(search_term))
-    with open('Mitre_CVE_database.csv', encoding='ANSI') as database:
+    with open('Mitre_CVE_database.csv', encoding='ISO 8859-1') as database:
         cve_reader = csv.reader(database)
         found = []
         for data in cve_reader:
