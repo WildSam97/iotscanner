@@ -81,8 +81,6 @@ class main_GUI:
         self.status_label.grid(row=1, padx=2, pady=2)
         # frame for scroll and devices
         self.scroll_devices_frame = tk.Frame(self.main_frame)
-        self.scroll_devices_frame.grid(row=2, column=1, padx=2, pady=2,
-                                       sticky='NSWE')
         # devices_frame title
         self.scroll_title = tk.Label(self.scroll_devices_frame,
                                      text="Device List")
@@ -185,6 +183,8 @@ class main_GUI:
             column=1,
             padx=2,
             pady=2)
+        if len(self.device_list.keys()) == 0:
+            self.scroll_devices_frame.grid_forget()
     # end of switch_frames function
 
     # function for start scan button
@@ -262,6 +262,8 @@ class main_GUI:
     # function to display initial scan results on gui
     def display_initial_results(self):
         print("Adding intial results to gui")
+        self.scroll_devices_frame.grid(row=2, column=1, padx=2, pady=2,
+                                       sticky='NSWE')
         for ip, host in initial_scan_results.items():
             if len(host.hostnames):
                 tmp_host = host.hostnames[0]
@@ -329,7 +331,7 @@ class main_GUI:
         check_page = urllib.request.urlopen(index_url).read().decode("utf8")
         try:
             last_generated = re.search(
-                'CVE downloads data last generated:\\n(.+?)\n\n',
+                'CVE downloads data last generated:\n(.+?)\n\n',
                 check_page).group(1)
         except AttributeError:
             last_generated = "0"  # if for some reason it is not available set
@@ -337,22 +339,47 @@ class main_GUI:
         print(last_generated)
         tmp_last_updated = self.last_updated.replace("-", "")
         tmp_last_generated = last_generated.replace("-", "")
-        if int(tmp_last_updated < tmp_last_generated):
+        if tmp_last_updated < tmp_last_generated:
             print("Downloading latest vulnerability data")
-            self.status_var.set("Downloading vulnerability information")
+            self.status_var.set("Downloading CVE List")
+            root.update()
             vul_url = "https://cve.mitre.org/data/downloads/allitems.csv"
             with urllib.request.urlopen(vul_url) as response, \
                     open("Mitre_CVE_database.csv", 'wb') as out_file:
                     data = response.read()
                     out_file.write(data)
-            today = str(date.today())
-            with open("last_updated.txt", 'w') as update_file:
-                update_file.write(today)
-            self.status_var.set("Ready to Scan")
             print("Download finished")
         else:
             print("Vulnerability data already up to date")
-            self.status_var.set("Ready to Scan")
+        # check when password list was last updated and download if needed
+        index_url = "https://github.com/danielmiessler/SecLists/blob/master/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt"  # noqa
+        check_page = urllib.request.urlopen(index_url).read().decode("utf8")
+        try:
+            last_generated = re.search(
+                '<relative-time datetime="(.+?)T', check_page).group(1)
+        except AttributeError:
+            # if for some reason it is not available set
+            # to 0 so that it does not attempt a download
+            last_generated = "0"
+            print(last_generated)
+            tmp_last_updated = self.last_updated.replace("-", "")
+            tmp_last_generated = last_generated.replace("-", "")
+        if tmp_last_updated < tmp_last_generated:
+            print("Downloading top-1000000 password list")
+            self.status_var.set("Downloading password lists")
+            root.update()
+            pw_url = "https://github.com/danielmiessler/SecLists/raw/master/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt"  # noqa
+            with urllib.request.urlopen(pw_url) as response, \
+                    open("top_10_million_top_1_mil.txt", 'wb') as out_file:
+                    data = response.read()
+                    out_file.write(data)
+        else:
+            print("Top 10 mil top 1 mil up to date")
+        # update last_updated file with todays date.
+        today = str(date.today())
+        with open("last_updated.txt", 'w') as update_file:
+            update_file.write(today)
+        self.status_var.set("Ready to Scan")
         # use exploit db as well?
         # https://github.com/offensive-security/exploit-database/raw/master/files_exploits.csv
     # end of check_updates function
@@ -579,7 +606,6 @@ class search_frame:
             self.search_frame)
         # frame for found vulnerabilities
         self.scroll_results_frame = tk.Frame(self.search_frame)
-        self.scroll_results_frame.grid(row=3, column=0)
         self.results_frame = tk.Frame(self.scroll_results_frame)
         self.results_frame.grid(row=0, column=0)
         # frame for the scroll buttons
@@ -601,10 +627,13 @@ class search_frame:
 
     # function to perform search
     def perform_search(self):
+        for v in self.vulnerability_list:
+            v.layout_frame.destroy()
         self.vulnerability_list = []
         print("searching for: {0}".format(self.search_var.get()))
         results = lookup_vulnerability(self.search_var.get())
         # add each result to list
+        self.scroll_results_frame.grid(row=3, column=0)
         for r in results:
             print(r[0])
             link = ""
@@ -701,7 +730,7 @@ class password_frame:
             self.password_frame,
             width=40,
             textvariable=self.username)
-        self.username_entry.grid(row=1, column=1)
+        self.username_entry.grid(row=1, column=1, sticky='W')
         self.username_label = tk.Label(
             self.password_frame,
             text="Username:")
@@ -715,29 +744,37 @@ class password_frame:
             width=40,
             show='*',
             textvariable=self.password)
-        self.password_entry.grid(row=2, column=1)
+        self.password_entry.grid(row=2, column=1, sticky='W')
         self.check_button = tk.Button(
             self.password_frame,
-            text="Check Password")
-        self.check_button.grid(row=3, column=0)
+            text="Check Password",
+            command=self.check_password)
+        self.check_button.grid(row=3, column=1, padx=65, sticky='W')
         # label for password strength feedback
         self.length_label = tk.Label(self.password_frame)
         self.characters_label = tk.Label(self.password_frame)
         self.matching_label = tk.Label(self.password_frame)
+        self.list_label = tk.Label(self.password_frame)
+        self.strength_label = tk.Label(self.password_frame)
     # end of __init__ function
 
     # function to test password
     def check_password(self):
         # test if username is contained in password
         strength_rating = 0
+        if self.password_entry.get() == "":
+            return
         if self.username_entry.get() == self.password_entry.get():
             text = "SEVERE: Username and password are the same"
             strength_rating -= 100
+        elif self.username_entry.get() == "":
+            text = "No username given"
+            strength_rating += 1  # can't test against username if not given
         elif self.username_entry.get() in self.password_entry.get():
             text = "WARNING: Password contains username"
             strength_rating -= 1
         else:
-            text = "OK: Password does not contain username"
+            text = "GOOD: Password does not contain username"
             strength_rating += 1
         self.matching_label['text'] = text
         self.matching_label.grid(row=4, column=1)
@@ -755,8 +792,55 @@ class password_frame:
         self.length_label['text'] = text
         self.length_label.grid(row=5, column=1)
         # test password character types
-        # re.Search("[0-9]")
+        types = []
+        all_types = [
+            "Numbers",
+            "Lowercase",
+            "Uppercase",
+            "Special characters (Punctuation etc.)"]
+        if re.search("[0-9]", self.password_entry.get()):
+            types.append("Numbers")
+        if re.search("[a-z]", self.password_entry.get()):
+            types.append("Lowercase")
+        if re.search("[A-Z]", self.password_entry.get()):
+            types.append("Uppercase")
+        if re.search("[^a-zA-Z0-9]", self.password_entry.get()):
+            types.append("Special characters (Punctuation etc.)")
+        strength_rating += (len(types)-1)
+        for type in types:
+            if type in all_types:
+                all_types.remove(type)
+        if len(all_types):
+            text = "Password does not contain: "
+            for type in all_types:
+                text += "{0}, ".format(type)
+            text = text[:-2]
+        else:
+            text = "GOOD: Password contains mixture of uppercase, lowercase,"
+            text += " numbers and special characters"
+        self.characters_label['text'] = text
+        self.characters_label.grid(row=6, column=1)
         # test password against wordlist
+        with open("top_10_million_top_1_mil.txt", 'r',
+                  encoding='utf-8') as password_file:
+            password_list = [line.rstrip() for line in password_file]
+            if self.password_entry.get() in password_list:
+                print("Found password!")
+                strength_rating -= 100
+                text = "SEVERE: Password found in common passwords list"
+            else:
+                text = "Password not in list"
+            self.list_label['text'] = text
+            self.list_label.grid(row=7, column=1)
+        if strength_rating < 1:
+            self.strength_label['text'] = "Password Strength: Minimal"
+        elif strength_rating < 4:
+            self.strength_label['text'] = "Password Strength: Weak"
+        elif strength_rating < 6:
+            self.strength_label['text'] = "Password Strength: OK"
+        else:
+            self.strength_label['text'] = "Password Strength: Strong"
+        self.strength_label.grid(row=8, column=1)
 
         # overall strength rating
 # end of password_frame class
@@ -874,7 +958,8 @@ def lookup_vulnerability(search_term):
         found = []
         for data in cve_reader:
             try:
-                if search_term in data[2]:
+                # convert to lowercase to improve matching
+                if search_term.lower() in data[2].lower():
                     found.append(data)
             except Exception:
                 print(Exception)
