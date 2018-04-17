@@ -558,7 +558,7 @@ class search_frame:
                                     text="Search for vulnerabilites",
                                     anchor='w')
         self.title_label.grid(row=0, column=0, sticky='W')
-        # search entry, label and button
+        # search entry and button
         self.entry_frame = tk.Frame(self.search_frame)
         self.entry_frame.grid(row=1, column=0)
         self.search_var = tk.StringVar()
@@ -694,8 +694,71 @@ class password_frame:
         # title label
         self.title_label = tk.Label(self.password_frame,
                                     text="Password Checker")
-        self.title_label.pack(side='top')
+        self.title_label.grid(row=0, column=0)
+        # entry, button to test
+        self.username = tk.StringVar()
+        self.username_entry = tk.Entry(
+            self.password_frame,
+            width=40,
+            textvariable=self.username)
+        self.username_entry.grid(row=1, column=1)
+        self.username_label = tk.Label(
+            self.password_frame,
+            text="Username:")
+        self.username_label.grid(row=1, column=0)
+        self.password = tk.StringVar()
+        self.password_label = tk.Label(self.password_frame, text="Password:")
+        self.password_label.grid(row=2, column=0)
+        self.password_entry = tk.Entry(
+            self.password_frame,
+            exportselection=0,
+            width=40,
+            show='*',
+            textvariable=self.password)
+        self.password_entry.grid(row=2, column=1)
+        self.check_button = tk.Button(
+            self.password_frame,
+            text="Check Password")
+        self.check_button.grid(row=3, column=0)
+        # label for password strength feedback
+        self.length_label = tk.Label(self.password_frame)
+        self.characters_label = tk.Label(self.password_frame)
+        self.matching_label = tk.Label(self.password_frame)
     # end of __init__ function
+
+    # function to test password
+    def check_password(self):
+        # test if username is contained in password
+        strength_rating = 0
+        if self.username_entry.get() == self.password_entry.get():
+            text = "SEVERE: Username and password are the same"
+            strength_rating -= 100
+        elif self.username_entry.get() in self.password_entry.get():
+            text = "WARNING: Password contains username"
+            strength_rating -= 1
+        else:
+            text = "OK: Password does not contain username"
+            strength_rating += 1
+        self.matching_label['text'] = text
+        self.matching_label.grid(row=4, column=1)
+        # test password length
+        length = len(self.password_entry.get())
+        if length < 8:
+            text = "WARNING: Password length short"
+            strength_rating -= 1
+        elif length < 12:
+            text = "OK: Password is 8 or more characters long"
+            strength_rating += 1
+        else:
+            text = "GOOD: Password is 12 or more characters long"
+            strength_rating += 2
+        self.length_label['text'] = text
+        self.length_label.grid(row=5, column=1)
+        # test password character types
+        # re.Search("[0-9]")
+        # test password against wordlist
+
+        # overall strength rating
 # end of password_frame class
 
 
