@@ -135,7 +135,7 @@ class main_GUI:
         # frame for password checker
         self.password_frame = password_frame(self.main_frame)
         # dummy frame for detailed view (in case nav used before scan is run)
-        self.scan_details_frame = details_frame(self.main_frame, 0)
+        self.scan_details_frame = details_frame(self.main_frame, "", "", "")
         # check when last scan was ran
         self.last_run()
         # check if vulnerability databases need updating
@@ -242,19 +242,25 @@ class main_GUI:
             elif msg == "detailed scan finished":
                 self.display_detailed_results(ips[self.num_detailed_scans])
                 self.num_detailed_scans += 1
+                self.scan_progress.step(
+                    (70 * (1/len(initial_scan_results.keys()))))
                 text = "{0}/{1} detailed scans complete".format(
                     self.num_detailed_scans, len(initial_scan_results.keys()))
                 self.status_var.set(text)
-                # if all detailed scans are done start vulnerability detection
+                # if all detailed scans are done scan is finished
                 if self.num_detailed_scans == len(initial_scan_results.keys()):
-                    self.status_var.set("Detailed scans complete")
-                    print("Starting vulnerability detection")
+                    self.status_var.set("Scan complete")
+                    self.scan_button['state'] = "normal"
+                    today = str(date.today())
+                    with open("last_updated.txt", 'w') as update_file:
+                        update_file.write(today)
+                    # print("Starting vulnerability detection")
                 # otherwise start the scan for the next device in the list
                 else:
                     threaded_detailed_scan(
                         self.queue,
                         ips[self.num_detailed_scans]).start()
-                self.master.after(100, self.process_queue)
+                    self.master.after(100, self.process_queue)
         except queue.Empty:
             self.master.after(100, self.process_queue)
     # end of process_queue function
@@ -299,6 +305,8 @@ class main_GUI:
         except Exception:
             dev_frame.OS_label['text'] = "Operating System: unknown"
             dev_frame.os_name.set("unknown")
+        dev_frame.vuln_label['text'] = "Potential Vulnerabilities: {0}".format(
+            len(vulnerability_dict[host.address]))
     # end of display_detailed_results function
 
     # function to check when last scan was carried out
@@ -361,9 +369,9 @@ class main_GUI:
             # if for some reason it is not available set
             # to 0 so that it does not attempt a download
             last_generated = "0"
-            print(last_generated)
-            tmp_last_updated = self.last_updated.replace("-", "")
-            tmp_last_generated = last_generated.replace("-", "")
+        print(last_generated)
+        tmp_last_updated = self.last_updated.replace("-", "")
+        tmp_last_generated = last_generated.replace("-", "")
         if tmp_last_updated < tmp_last_generated:
             print("Downloading top-1000000 password list")
             self.status_var.set("Downloading password lists")
@@ -523,6 +531,11 @@ class device_frame:
         self.device_name_button.grid(row=0,
                                      column=3, padx=2, pady=2, sticky=tk.E)
         self.OS_label.grid(row=2, column=2, padx=2, pady=2, sticky='W')
+        # lookup vulnerabilities for this device as name and os is changed
+        find_device_vulnerabilities(
+            detailed_scan_results[self.ip_address],
+            self.os_name.get(),
+            self.device_name.get())
     # end of save_device_name function
 
     # function to cancel changes to device name
@@ -548,7 +561,9 @@ class device_frame:
         self.container.scroll_devices_frame.grid_forget()
         self.container.scan_details_frame = details_frame(
             self.container.main_frame,
-            self.ip_address)
+            self.ip_address,
+            self.device_name.get(),
+            self.os_name.get())
         self.container.scan_details_frame.details_frame.grid(
             row=2,
             column=1,
@@ -561,16 +576,167 @@ class device_frame:
 
 # class for frame to hold detailed report of a specific device
 class details_frame:
-        def __init__(self, master, ip_address):
-            self.master = master
-            # frame to hold everything
-            self.details_frame = tk.Frame(master)
-            # title label frame
-            self.title_label = tk.Label(
-                self.details_frame,
-                text="Detailed Report for {0}".format(ip_address))
-            self.title_label.pack(side='top')
-        # end of __init__ function
+    def __init__(self, master, ip_address, dev_name, dev_os):
+        self.master = master
+        self.ip_address = ip_address
+        self.dev_name = dev_name
+        self.dev_os = dev_os
+        # frame to hold everything
+        self.details_frame = tk.Frame(master)
+        # device
+        if ip_address not in detailed_scan_results.keys():
+            return
+        self.device = detailed_scan_results[ip_address]
+        # title label frame
+        self.title_label = tk.Label(
+            self.details_frame,
+            text="Detailed Report for {0}".format(self.ip_address))
+        self.title_label.grid(row=0, column=0, sticky='W')
+        # upper frame
+        self.header_frame = tk.Frame(self.details_frame)
+        self.header_frame.grid(row=1, column=0, sticky='WE')
+        # label for vendor
+        self.dev_vendor_label = tk.Label(self.header_frame,
+                                         text="Vendor: {0}".format(
+                                            self.device.vendor),
+                                         anchor='w')
+        self.dev_vendor_label.grid(row=0, column=0, sticky='W')
+        # label for device name
+        self.dev_name_label = tk.Label(self.header_frame,
+                                       text="Device name: {0}".format(
+                                        self.dev_name),
+                                       anchor='w')
+        self.dev_name_label.grid(row=0, column=1, sticky='W')
+        # label for OS
+        self.os_name_label = tk.Label(self.header_frame,
+                                      text="Operating System: {0}".format(
+                                        self.dev_os),
+                                      anchor='w')
+        self.os_name_label.grid(row=1, column=0, sticky='W')
+        # frame for services
+        self.service_frame = tk.Frame(self.details_frame)
+        self.service_frame.grid(row=2, column=0, sticky='WE')
+        # label for open ports
+        self.service_label = tk.Label(
+            self.service_frame,
+            text="{0} services running on open ports:".format(
+                len(self.device.get_open_ports())),
+            anchor='w')
+        self.service_label.grid(row=0, column=0, sticky='W')
+        # frame for scrollbar and list box
+        self.list_frame = tk.Frame(self.service_frame)
+        self.list_frame.grid(row=1, column=0)
+        # scrollbar for list box
+        self.list_scroll = tk.Scrollbar(self.list_frame)
+        self.list_scroll.grid(row=0, column=1, sticky='NSEW')
+        # general fix suggestion label
+        self.general_label = tk.Label(self.service_frame)
+        self.general_label.grid(row=1, column=1)
+        self.general_fix_text = "General Fixes: \n"
+        # listbox for services on open ports
+        self.service_list = tk.Listbox(
+            self.list_frame,
+            height=10,
+            width=40,
+            yscrollcommand=self.list_scroll.set)
+        self.service_list.grid(row=0, column=0, sticky='NSEW')
+        # loop through services, add each to listbox
+        self.service_list.insert(0, "PORT      SERVICE")
+        for service in self.device.services:
+            if service.state != "open":
+                continue
+            else:
+                text = "{0:>5s}/{1:3s}  {2}".format(
+                    str(service.port),
+                    service.protocol,
+                    service.service)
+                self.service_list.insert(tk.END, text)
+                print(service.banner)
+                # print(service.servicefp)
+                if "upnp" in service.service.lower():
+                    self.general_fix_text += "upnp service running! - "
+                    self.general_fix_text += "consider closing this service \n"
+                if "msrpc" in service.service.lower():
+                    self.general_fix_text += "Microsoft RPC service running - "
+                    self.general_fix_text += "Check your router firewall to "
+                    self.general_fix_text += "make sure this is not exposed "
+                    self.general_fix_text += "outside of your network"
+                if service.port == 5357:
+                    self.general_fix_text += "Port 5357 is open, it is normally used by Microsoft Network Discovery: \n Make sure it is Filtered on public networks, and the Firewall only accepts connections from the local network"  # noqa
+        if len(self.device.get_open_ports()) > 0:
+            self.general_fix_text += "{0} ports are open. - ".format(
+                len(self.device.get_open_ports()))
+            self.general_fix_text += "consider closing or filtering them if possible \n"  # noqa
+        self.general_fix_text += "Most vulnerabilities are fixed via updates - ensure your device is up to date \n"  # noqa
+        self.general_fix_text += "Check your router firewall to make sure local services are not exposed to the internet"  # noqa
+        self.general_label['text'] = self.general_fix_text
+        # list of vulnerability frames
+        self.vulnerability_list = []
+        # label for number of results
+        self.results_label = tk.Label(
+            self.details_frame)
+        # frame for found vulnerabilities
+        self.scroll_results_frame = tk.Frame(self.details_frame)
+        self.results_frame = tk.Frame(self.scroll_results_frame)
+        self.results_frame.grid(row=0, column=0)
+        # frame for the scroll buttons
+        self.scroll_frame = tk.Frame(self.scroll_results_frame)
+        self.scroll_frame.grid(row=0, column=1, sticky='NSE')
+        # scroll up
+        self.scroll_up_button = tk.Button(
+            self.scroll_frame,
+            text="^",
+            command=lambda: self.scroll_vulnerabilities(1))
+        self.scroll_up_button.pack(side=tk.TOP)
+        # scroll down
+        self.scroll_down_button = tk.Button(
+            self.scroll_frame,
+            text="v",
+            command=lambda: self.scroll_vulnerabilities(-1))
+        self.scroll_down_button.pack(side=tk.BOTTOM)
+        self.scroll_results_frame.grid(row=4, column=0)
+        # display in grid
+        results = vulnerability_dict[self.device.address]
+        for r in results:
+            print(r[0])
+            link = ""
+            if r[0][:3] == "CVE":
+                base = "https://cve.mitre.org/cgi-bin/cvename.cgi?name="
+                link = "{0}{1}".format(base, r[0])
+            self.vulnerability_list.append(vulnerability_frame(
+                self.results_frame,
+                len(self.vulnerability_list),
+                r[0],
+                r[2],
+                link))
+        for v in self.vulnerability_list:
+            if v.index < 4:
+                v.layout_frame.grid(row=v.index, pady=5)
+        # label for number of results
+        self.results_label['text'] = "Found {0} Potential Vulnerabilities".format(  # noqa
+            len(self.vulnerability_list))
+        self.results_label.grid(row=3, column=0)
+    # end of __init__ function
+
+    # function to scroll through vulnerabilities
+    def scroll_vulnerabilities(self, amount):
+        # check if we need to scroll
+        canscroll = 0
+        for vulnerability in self.vulnerability_list:
+            if ((vulnerability.index < 0 and amount > 0)
+               or (vulnerability.index > 3 and amount < 0)):
+                    canscroll = 1
+        # if we do then scroll
+        if canscroll == 1:
+            for vulnerability in self.vulnerability_list:
+                vulnerability.index = vulnerability.index + amount
+                if vulnerability.index < 0 or vulnerability.index > 3:
+                    vulnerability.layout_frame.grid_forget()
+                else:
+                    vulnerability.layout_frame.grid(row=vulnerability.index,
+                                                    pady=5)
+    # end of scroll_devices method
+
 # end of details_frame class
 
 
@@ -652,8 +818,8 @@ class search_frame:
         self.results_label.grid(row=2, column=0)
         # display in grid
         for v in self.vulnerability_list:
-            if v.index < 6:
-                v.layout_frame.grid(row=v.index)
+            if v.index < 4:
+                v.layout_frame.grid(row=v.index, pady=5)
     # end of perform_search function
 
     # function to scroll through vulnerabilities
@@ -662,16 +828,17 @@ class search_frame:
         canscroll = 0
         for vulnerability in self.vulnerability_list:
             if ((vulnerability.index < 0 and amount > 0)
-               or (vulnerability.index > 5 and amount < 0)):
+               or (vulnerability.index > 3 and amount < 0)):
                     canscroll = 1
         # if we do then scroll
         if canscroll == 1:
             for vulnerability in self.vulnerability_list:
                 vulnerability.index = vulnerability.index + amount
-                if vulnerability.index < 0 or vulnerability.index > 5:
+                if vulnerability.index < 0 or vulnerability.index > 3:
                     vulnerability.layout_frame.grid_forget()
                 else:
-                    vulnerability.layout_frame.grid(row=vulnerability.index)
+                    vulnerability.layout_frame.grid(row=vulnerability.index,
+                                                    pady=5)
     # end of scroll_devices method
 # end of search_frame class
 
@@ -682,27 +849,43 @@ class vulnerability_frame:
         self.master = master
         self.index = index
         self.link = link
+        self.description = description
         # frame to hold everything
-        self.layout_frame = tk.Frame(master, relief='groove')
+        self.layout_frame = tk.Frame(master, relief='ridge', borderwidth=2)
         self.header_frame = tk.Frame(self.layout_frame)
         self.header_frame.grid(row=0, column=0)
         # label for vulnerability id
         self.id_label = tk.Label(self.header_frame,
                                  text="Vulnerability ID: {0}".format(id))
         self.id_label.grid(row=0, column=0, sticky='W')
+        # vulnerability description Label
+        self.desc_label = tk.Label(self.layout_frame,
+                                   text="Description:",
+                                   anchor='w')
+        self.desc_label.grid(row=1, column=0, sticky='W')
         # vulnerability description text
         self.desc_text = tk.Text(self.layout_frame,
                                  width=100,
-                                 height=5,
-                                 relief="groove",
+                                 height=3,
                                  wrap='word')
         self.desc_text.insert("end", description)
-        self.desc_text.grid(row=1, rowspan=2, column=0, sticky='W')
+        self.desc_text.grid(row=2, columnspan=2, column=0, sticky='W')
         # link button (opens web browser)
         self.link_button = tk.Button(self.header_frame,
                                      text="View on web",
                                      command=self.open_in_browser)
         self.link_button.grid(row=0, column=1, sticky='W')
+        # label for fixes
+        # self.fixes_label = tk.Label(self.layout_frame,
+        #                             text="Possible Fixes:",
+        #                             anchor='w')
+        # self.fixes_label.grid(row=1, column=2, sticky='W')
+        # text box for suggested fixes
+        # self.fixes_text = tk.Text(self.layout_frame,
+        #                           width=100,
+        #                           height=3,
+        #                           wrap='word')
+        # self.fixes_text.grid(row=2, columnspan=2, column=2, sticky='W')
     # end of __init__ function
 
     # function to view vulnerability on the web
@@ -711,6 +894,15 @@ class vulnerability_frame:
             webbrowser.open_new_tab(self.link)
         except Exception:
             print(Exception)
+    # end of open_in_browser function
+
+    # function to suggest fix
+    # def suggest_fix(self):
+    #     fixes = []
+    #    fixes.append("Most vulnerabilities are fixed via updates - ensure your device is up to date")
+    #    if "remote" in self.description.lower():
+    #        fixes.append("Consider configuring your firewall to block external access to this service")
+
 # end of vulnerability_frame class
 
 
@@ -905,6 +1097,8 @@ class threaded_detailed_scan(threading.Thread):
             # add each host to the detailed results
             for host in report.hosts:
                 detailed_scan_results[host.address] = host
+                # lookup vulnerabilities for that device
+                find_device_vulnerabilities(host)
         # add message to queue to say detailed scan is done
         self.queue.put("detailed scan finished")
     # end of run function
@@ -943,28 +1137,62 @@ def print_scan(nmap_report):
                 print("Vendor is {0}.".format(host.vendor))
 
 
-def detect_vulnerabilities(device_name, device_os, device_ip):
-    print("Detecting vulnerabilities for: {0}".format(device_ip))
-    # host = detailed_scan_results[device_ip]
+# def detect_vulnerabilities(device_name, device_os, device_ip):
+#     print("Detecting vulnerabilities for: {0}".format(device_ip))
+#     host = detailed_scan_results[device_ip]
+#     vulnerabilities = []
+#     for service in host.services:
+#         vulnerabilities += lookup_vulnerability(service.service)
 
 
 # function to lookup a vulnerability based on a search term
-def lookup_vulnerability(search_term):
+def lookup_vulnerability(search_term, additional_term=""):
     if search_term == "":
         return []
-    print("searching {0}".format(search_term))
+    print("searching {0}".format(search_term + additional_term))
     with open('Mitre_CVE_database.csv', encoding='ISO 8859-1') as database:
         cve_reader = csv.reader(database)
         found = []
         for data in cve_reader:
             try:
                 # convert to lowercase to improve matching
-                if search_term.lower() in data[2].lower():
-                    found.append(data)
+                # if additional_term != "":
+                if (search_term.lower() in data[2].lower() and
+                        additional_term.lower() in data[2].lower()):
+                        found.append(data)
+                # if search_term.lower() in data[2].lower():
+                #    found.append(data)
             except Exception:
                 print(Exception)
         return found
 # end of lookup_vulnerability function
+
+
+# function to lookup vulnerabilities for device
+def find_device_vulnerabilities(device, dev_os="", dev_name=""):
+    # for v in vulnerability_list:
+    #    v.layout_frame.destroy()
+    # vulnerability_list = []
+    print("vulnerability search for: {0}".format(device.address))
+    results = []
+    # search for each service
+    for service in device.services:
+        if service.state == "open" and service.banner:
+            for cpe in service.cpelist:
+                print(cpe.get_product())
+                if cpe.get_product() and not cpe.is_operating_system():
+                    results += lookup_vulnerability(
+                        cpe.get_product(),
+                        cpe.get_version())
+    # search for vendor and operating system
+    if dev_os != "" and dev_os != "unknown" and device.vendor != "":
+        results += lookup_vulnerability(device.vendor, dev_os)
+    # search for device name
+    if dev_name != device.address and dev_name != "":
+        results += lookup_vulnerability(dev_name)
+    # add each result to list
+    vulnerability_dict[device.address] = results
+    # set vulnerability dictionary entry for this device
 
 
 root = tk.Tk()
