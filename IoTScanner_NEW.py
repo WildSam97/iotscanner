@@ -252,8 +252,9 @@ class main_GUI:
                     self.status_var.set("Scan complete")
                     self.scan_button['state'] = "normal"
                     today = str(date.today())
-                    with open("last_updated.txt", 'w') as update_file:
+                    with open("last_scan.txt", 'w') as update_file:
                         update_file.write(today)
+                    self.last_scan_var.set("Last Scan date: {0}".format(today))
                     # print("Starting vulnerability detection")
                 # otherwise start the scan for the next device in the list
                 else:
@@ -374,15 +375,33 @@ class main_GUI:
         tmp_last_generated = last_generated.replace("-", "")
         if tmp_last_updated < tmp_last_generated:
             print("Downloading top-1000000 password list")
-            self.status_var.set("Downloading password lists")
+            self.status_var.set("Downloading password list")
             root.update()
             pw_url = "https://github.com/danielmiessler/SecLists/raw/master/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt"  # noqa
             with urllib.request.urlopen(pw_url) as response, \
                     open("top_10_million_top_1_mil.txt", 'wb') as out_file:
                     data = response.read()
                     out_file.write(data)
+            print("Download Finished")
         else:
             print("Top 10 mil top 1 mil up to date")
+        # exploit db is updated daily so check if already downloaded today
+        # if not download it
+        last_generated = str(date.today())
+        tmp_last_updated = self.last_updated.replace("-", "")
+        tmp_last_generated = last_generated.replace("-", "")
+        if tmp_last_updated < tmp_last_generated:
+            print("Downloading exploit db list")
+            self.status_var.set("Downloading exploit db list")
+            root.update()
+            db_url = "https://raw.githubusercontent.com/offensive-security/exploit-database/master/files_exploits.csv"  # noqa
+            with urllib.request.urlopen(db_url) as response, \
+                    open("exploitdb.csv", 'wb') as out_file:
+                    data = response.read()
+                    out_file.write(data)
+            print("Download finished")
+        else:
+            print("Exploit db up to date")
         # update last_updated file with todays date.
         today = str(date.today())
         with open("last_updated.txt", 'w') as update_file:
@@ -703,6 +722,10 @@ class details_frame:
             if r[0][:3] == "CVE":
                 base = "https://cve.mitre.org/cgi-bin/cvename.cgi?name="
                 link = "{0}{1}".format(base, r[0])
+            else:
+                print(r[0])
+                base = "https://www.exploit-db.com/exploits/"
+                link = "{0}{1}/".format(base, r[0])
             self.vulnerability_list.append(vulnerability_frame(
                 self.results_frame,
                 len(self.vulnerability_list),
@@ -806,6 +829,10 @@ class search_frame:
             if r[0][:3] == "CVE":
                 base = "https://cve.mitre.org/cgi-bin/cvename.cgi?name="
                 link = "{0}{1}".format(base, r[0])
+            else:
+                print(r[0])
+                base = "https://www.exploit-db.com/exploits/"
+                link = "{0}{1}/".format(base, r[0])
             self.vulnerability_list.append(vulnerability_frame(
                 self.results_frame,
                 len(self.vulnerability_list),
@@ -1149,10 +1176,10 @@ def print_scan(nmap_report):
 def lookup_vulnerability(search_term, additional_term=""):
     if search_term == "":
         return []
+    found = []
     print("searching {0}".format(search_term + additional_term))
     with open('Mitre_CVE_database.csv', encoding='ISO 8859-1') as database:
         cve_reader = csv.reader(database)
-        found = []
         for data in cve_reader:
             try:
                 # convert to lowercase to improve matching
@@ -1164,7 +1191,20 @@ def lookup_vulnerability(search_term, additional_term=""):
                 #    found.append(data)
             except Exception:
                 print(Exception)
-        return found
+    with open('exploitdb.csv', encoding='ISO 8859-1') as database:
+        cve_reader = csv.reader(database)
+        for data in cve_reader:
+            try:
+                # convert to lowercase to improve matching
+                # if additional_term != "":
+                if (search_term.lower() in data[2].lower() and
+                        additional_term.lower() in data[2].lower()):
+                        found.append(data)
+                # if search_term.lower() in data[2].lower():
+                #    found.append(data)
+            except Exception:
+                print(Exception)
+    return found
 # end of lookup_vulnerability function
 
 
