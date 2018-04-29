@@ -6,6 +6,10 @@ CVE Usage: MITRE hereby grants you a perpetual, worldwide, non-exclusive, no-cha
 
 https://cve.mitre.org/about/termsofuse.html
 
+Exploit DB: GNU General Public License v2.0
+
+https://github.com/offensive-security/exploit-database/blob/master/LICENSE.md
+
 SecLists password list: Creative Commons Attribution ShareAlike 3.0 License (best for documentation projects) and MIT Licence
 
 https://www.owasp.org/index.php/OWASP_SecLists_Project
