@@ -13,6 +13,7 @@ import re
 from datetime import date
 import csv
 import webbrowser
+import ipaddress
 
 ips = []
 initial_scan_results = {}
@@ -36,6 +37,10 @@ class main_GUI:
                                     text="IoT Scanner",
                                     font=title_font)
         self.title_label.grid(row=0, column=1, sticky='WE')
+        # disclaimer
+        self.disclaimer = "This program performs \n port scanning, \n only target networks that \n you have permission to scan."  # noqa
+        self.disclaimer_label = tk.Label(self.main_frame, text=self.disclaimer)
+        self.disclaimer_label.grid(row=1, column=0, sticky='NW')
         # scan frame, holds info about scan in progress
         self.scan_frame = tk.Frame(self.main_frame,
                                    padx=5,
@@ -55,12 +60,18 @@ class main_GUI:
         self.last_scan_label = tk.Label(self.info_frame,
                                         textvariable=self.last_scan_var)
         self.last_scan_label.grid(row=0, column=0, padx=2, pady=2)
-        # label for this device's ip address
+        # label and entry for target address
         self.my_ip_var = tk.StringVar()
-        self.my_ip_var.set("This machine's IP: Scan not run")
-        self.my_ip_label = tk.Label(self.info_frame,
+        # self.my_ip_var.set("Scan not run")
+        self.target_frame = tk.Frame(self.info_frame)
+        self.target_frame.grid(row=1, column=0, padx=2, pady=2)
+        self.my_ip_entry = tk.Entry(self.target_frame,
                                     textvariable=self.my_ip_var)
-        self.my_ip_label.grid(row=1, column=0, padx=2, pady=2)
+        self.my_ip_entry.grid(row=0, column=1)
+        self.my_ip_label = tk.Label(self.target_frame,
+                                    text="Target:",
+                                    anchor='w')
+        self.my_ip_label.grid(row=0, column=0)
         # button to run a new scan
         self.scan_button = tk.Button(self.scan_frame,
                                      text="Run Scan",
@@ -138,6 +149,8 @@ class main_GUI:
         self.scan_details_frame = details_frame(self.main_frame, "", "", "")
         # check when last scan was ran
         self.last_run()
+        # get the local IP address of the device
+        self.get_local_ip()
         # check if vulnerability databases need updating
         self.master.after(100, self.check_updates)
         # add a bunch of test devices
@@ -153,6 +166,22 @@ class main_GUI:
         #            2,
         #            5))
     # end of __init__ function
+
+    def get_local_ip(self):
+        # use sockets to find default ip of current device
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # doesn't matter if it is reachable
+            s.connect(('10.255.255.255', 53))
+            self.localIP = s.getsockname()[0]
+        except Exception as e:
+            self.localIP = "127.0.0.1"
+        finally:
+            s.close()
+        # append /24 to scan subnet device in on
+        self.target_range = self.localIP + '/24'
+        self.my_ip_var.set(self.target_range)
+    # end of get_local_ip method
 
     # method to scroll/cycle through the devices in the device list
     def scroll_devices(self, amount):
@@ -189,23 +218,26 @@ class main_GUI:
 
     # function for start scan button
     def start_scan(self):
+            try:
+                test = ipaddress.ip_network(self.my_ip_var.get(), strict=False)
+                if test.is_global:
+                    print("Warning, scanning a global IP address")
+                else:
+                    print("Local IP range targeted")
+            except Exception as e:
+                print(e)
+                print("Please enter a valid IP range")
+                return
             # set the status bar to show a scan is running
             self.status_var.set("Inital scan running")
             # disable to scan button so the user can't start another one
             self.scan_button['state'] = "disabled"
-            # use google dns and sockets to find ip of current device
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(('8.8.8.8', 53))
-            localIP = s.getsockname()[0]
-            self.my_ip_var.set("This machine's IP: {0}".format(localIP))
-            # append /24 to scan subnet device in on
-            self.target_range = localIP + '/24'
             # queue for messages from other threads
             self.queue = queue.Queue()
             # counter for initial scan passes
             self.num_scans = 0
             # start initial scan
-            threaded_initial_scan(self.queue, self.target_range).start()
+            threaded_initial_scan(self.queue, self.my_ip_var.get()).start()
             self.master.after(100, self.process_queue)
     # end of start scan function
 
@@ -226,7 +258,7 @@ class main_GUI:
                 # this increases chance a device is detected
                 if self.num_scans < 3:
                     threaded_initial_scan(self.queue,
-                                          self.target_range).start()
+                                          self.my_ip_var.get()).start()
                     self.master.after(100, self.process_queue)
                 # if 3 scans have been carried out start the detailed scans
                 elif self.num_scans == 3:
@@ -649,9 +681,14 @@ class details_frame:
         self.list_scroll = tk.Scrollbar(self.list_frame)
         self.list_scroll.grid(row=0, column=1, sticky='NSEW')
         # general fix suggestion label
-        self.general_label = tk.Label(self.service_frame)
-        self.general_label.grid(row=1, column=1)
+        # self.general_label = tk.Label(self.service_frame)
+        # self.general_label.grid(row=1, column=1)
+        self.fixes_button = tk.Button(
+            self.service_frame,
+            text="Suggest Fixes",
+            command=self.vulnerabilities_popup)
         self.general_fix_text = "General Fixes: \n"
+        self.fixes_button.grid(row=1, column=1)
         # listbox for services on open ports
         self.service_list = tk.Listbox(
             self.list_frame,
@@ -679,16 +716,16 @@ class details_frame:
                     self.general_fix_text += "Microsoft RPC service running - "
                     self.general_fix_text += "Check your router firewall to "
                     self.general_fix_text += "make sure this is not exposed "
-                    self.general_fix_text += "outside of your network"
+                    self.general_fix_text += "outside of your network \n"
                 if service.port == 5357:
-                    self.general_fix_text += "Port 5357 is open, it is normally used by Microsoft Network Discovery: \n Make sure it is Filtered on public networks, and the Firewall only accepts connections from the local network"  # noqa
+                    self.general_fix_text += "Port 5357 is open, it is normally used by Microsoft Network Discovery: \n Make sure it is Filtered on public networks, and the Firewall only accepts connections from the local network \n"  # noqa
         if len(self.device.get_open_ports()) > 0:
             self.general_fix_text += "{0} ports are open. - ".format(
                 len(self.device.get_open_ports()))
             self.general_fix_text += "consider closing or filtering them if possible \n"  # noqa
         self.general_fix_text += "Most vulnerabilities are fixed via updates - ensure your device is up to date \n"  # noqa
         self.general_fix_text += "Check your router firewall to make sure local services are not exposed to the internet"  # noqa
-        self.general_label['text'] = self.general_fix_text
+        # self.general_label['text'] = self.general_fix_text
         # list of vulnerability frames
         self.vulnerability_list = []
         # label for number of results
@@ -759,6 +796,11 @@ class details_frame:
                     vulnerability.layout_frame.grid(row=vulnerability.index,
                                                     pady=5)
     # end of scroll_devices method
+
+    def vulnerabilities_popup(self):
+        self.popup = tk.Toplevel()
+        self.fixes_label = tk.Label(self.popup, text=self.general_fix_text)
+        self.fixes_label.grid(row=0, column=0)
 
 # end of details_frame class
 
@@ -922,14 +964,6 @@ class vulnerability_frame:
         except Exception:
             print(Exception)
     # end of open_in_browser function
-
-    # function to suggest fix
-    # def suggest_fix(self):
-    #     fixes = []
-    #    fixes.append("Most vulnerabilities are fixed via updates - ensure your device is up to date")
-    #    if "remote" in self.description.lower():
-    #        fixes.append("Consider configuring your firewall to block external access to this service")
-
 # end of vulnerability_frame class
 
 
@@ -1076,6 +1110,7 @@ class threaded_initial_scan(threading.Thread):
 
     # main function called when thread is started
     def run(self):
+        print("Scan target: {}".format(self.localIP))
         # run a basic nmap scan to discover devices
         report = self.run_scan(self.localIP)
         if report:
@@ -1093,7 +1128,7 @@ class threaded_initial_scan(threading.Thread):
     # function to run the scan
     def run_scan(self, IP):
         parsed = None
-        nmproc = NmapProcess(IP, "-sP")
+        nmproc = NmapProcess(IP, "-sn")
         rc = nmproc.run()
         if rc != 0:
             print("nmap scan failed: {0}".format(nmproc.stderr))
